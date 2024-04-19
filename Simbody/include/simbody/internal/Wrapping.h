@@ -3,8 +3,11 @@
 
 #include "SimTKmath.h"
 #include "simbody/internal/MobilizedBody.h"
+#include "simbody/internal/MultibodySystem.h"
+#include "simbody/internal/SimbodyMatterSubsystem.h"
 #include "simbody/internal/common.h"
 #include "simmath/internal/ContactGeometry.h"
+
 #include <functional>
 #include <stdexcept>
 
@@ -150,6 +153,27 @@ private:
 };
 
 //==============================================================================
+//                                SUBSYSTEM
+//==============================================================================
+class WrappingPath;
+
+class SimTK_SIMBODY_EXPORT WrappingPathSubsystem : public Subsystem
+{
+public:
+    WrappingPathSubsystem();
+    explicit WrappingPathSubsystem(MultibodySystem&);
+
+    int getNumPaths() const;
+    const WrappingPath& getPath(WrappingPathIndex idx) const;
+    WrappingPath& updPath(WrappingPathIndex idx);
+
+    SimTK_PIMPL_DOWNCAST(WrappingPathSubsystem, Subsystem);
+    class Impl;
+    Impl& updImpl();
+    const Impl& getImpl() const;
+};
+
+//==============================================================================
 //                                PATH
 //==============================================================================
 class SimTK_SIMBODY_EXPORT WrappingPath
@@ -180,116 +204,186 @@ public:
     class Impl;
 
 private:
-    std::shared_ptr<Impl> impl = nullptr;
-};
+    friend WrappingPathSubsystem::Impl;
 
-//==============================================================================
-//                                SUBSYSTEM
-//==============================================================================
-class SimTK_SIMBODY_EXPORT WrappingPathSubsystem : public Subsystem
-{
-public:
-    WrappingPathSubsystem();
-    explicit WrappingPathSubsystem(MultibodySystem&);
-
-    int getNumCablePaths() const;
-    const WrappingPath& getPath(WrappingPathIndex idx) const;
-    WrappingPath& updPath(WrappingPathIndex idx);
-
-    /** @cond **/ // Hide from Doxygen.
-    SimTK_PIMPL_DOWNCAST(WrappingPathSubsystem, Subsystem);
-    class Impl;
-    Impl& updImpl();
     const Impl& getImpl() const;
-    /** @endcond **/
+    Impl& updImpl();
+
+    std::shared_ptr<Impl> impl = nullptr;
 };
 
 //==============================================================================
 //                         PATH :: IMPL
 //==============================================================================
-
 class WrappingPath::Impl {
-public:
+    public:
 
-    struct LineSegment
-    {
-        UnitVec3 d {NaN, NaN, NaN};
-        Real l = NaN;
-    };
+        struct LineSegment
+        {
+            UnitVec3 d {NaN, NaN, NaN};
+            Real l = NaN;
+        };
 
-    struct PosInfo
-    {
-        Vec3 xO {NaN, NaN, NaN};
-        Vec3 xI {NaN, NaN, NaN};
+        struct PosInfo
+        {
+            Vec3 xO {NaN, NaN, NaN};
+            Vec3 xI {NaN, NaN, NaN};
 
-        Real l = NaN;
+            Real l = NaN;
 
-        std::vector<LineSegment> lines;
+            std::vector<LineSegment> lines;
 
-        size_t loopIter = 0;
-    };
+            size_t loopIter = 0;
+        };
 
-    struct VizInfo
-    {
-        std::vector<std::pair<Vec3, UnitVec3>> points {};
-    };
+        struct VizInfo
+        {
+            std::vector<std::pair<Vec3, UnitVec3>> points {};
+        };
 
-    struct VelInfo
-    {
-        Real lDot = NaN;
-    };
+        struct VelInfo
+        {
+            Real lDot = NaN;
+        };
 
-    int getNumObstacles() const {return obstacles.size();}
-    const WrapObstacle& getObstacle(WrapObstacleIndex ix) const;
-    WrapObstacleIndex adoptObstacle(WrapObstacle& obstacle);
+        int getNumObstacles() const {return obstacles.size();}
+        const WrapObstacle& getObstacle(WrapObstacleIndex ix) const;
+        WrapObstacleIndex adoptObstacle(WrapObstacle& obstacle);
 
-    void calcPath(State& state, bool preventLiftOff = false) const;
-    void calcInitPath(State& state, std::function<Vec3(WrapObstacleIndex)> pointHints);
+        void calcPath(State& state, bool preventLiftOff = false) const;
+        void calcInitPath(State& state, std::function<Vec3(WrapObstacleIndex)> pointHints);
 
-    Real getPathError(const State& state) const;
-    Real getLength(const State& state) const;
-    Real getLengthDot(const State& state) const;
-    void applyBodyForces(const State& state, Real tension, Vector_<SpatialVec>& bodyForcesInG) const;
-    Real calcCablePower(const State& state, Real tension) const;
+        Real getPathError(const State& state) const;
+        Real getLength(const State& state) const;
+        Real getLengthDot(const State& state) const;
+        void applyBodyForces(const State& state, Real tension, Vector_<SpatialVec>& bodyForcesInG) const;
+        Real calcCablePower(const State& state, Real tension) const;
 
-    // Allocate state variables and cache entries.
-    void realizeTopology(State& state);
-    void realizeInstance(const State& state) const;
-    void realizePosition(const State& state) const;
-    void realizeVelocity(const State& state) const;
-    void realizeAcceleration(const State& state) const;
-    /* void calcEventTriggerInfo (const State&, Array_<EventTriggerInfo>&) const; */
-    /* void handleEvents (State&, Event::Cause, const Array_<EventId>& eventIds, const HandleEventsOptions& options, HandleEventsResults& results) const; */
+        // Allocate state variables and cache entries.
+        void realizeTopology(State& state);
+        void realizeInstance(const State& state) const;
+        void realizePosition(const State& state) const;
+        void realizeVelocity(const State& state) const;
+        void realizeAcceleration(const State& state) const;
+        /* void calcEventTriggerInfo (const State&, Array_<EventTriggerInfo>&) const; */
+        /* void handleEvents (State&, Event::Cause, const Array_<EventId>& eventIds, const HandleEventsOptions& options, HandleEventsResults& results) const; */
 
-    const PosInfo& getPosInfo(const State& state) const;
-    const VelInfo& getVelInfo(const State& state) const;
-    const VizInfo& getVizInfo(const State& state) const;
+        const PosInfo& getPosInfo(const State& state) const;
+        const VelInfo& getVelInfo(const State& state) const;
+        const VizInfo& getVizInfo(const State& state) const;
 
-    PosInfo& updPosEntry(const State& state) const;
-    VelInfo& updVelEntry(const State& state) const;
-    VizInfo& updVizInfo(const State& state) const;
+        PosInfo& updPosEntry(const State& state) const;
+        VelInfo& updVelEntry(const State& state) const;
+        VizInfo& updVizInfo(const State& state) const;
 
-    void calcPosInfo(PosInfo& posInfo) const;
-    void calcVelInfo(const PosInfo& posInfo, VelInfo& velInfo) const;
-    void calcVizInfo(const PosInfo& posInfo, VizInfo& vizInfo) const;
+        void calcPosInfo(PosInfo& posInfo) const;
+        void calcVelInfo(const PosInfo& posInfo, VelInfo& velInfo) const;
+        void calcVizInfo(const PosInfo& posInfo, VizInfo& vizInfo) const;
 
-    // Be sure to call this whenever you make a topology-level change to
-    // the cable definition, like adding an obstacle or modifying one in
-    // a significant way.
-    void invalidateTopology()
-    {   if (subsystem) subsystem->invalidateSubsystemTopologyCache(); }
+        // Be sure to call this whenever you make a topology-level change to
+        // the cable definition, like adding an obstacle or modifying one in
+        // a significant way.
+        void invalidateTopology()
+        {   if (subsystem) subsystem->invalidateSubsystemTopologyCache(); }
 
-private:
-friend class WrappingPath;
-    std::shared_ptr<WrappingPathSubsystem> subsystem = nullptr;
-    WrappingPathIndex          index {};
+    private:
+        friend class WrappingPath;
+        std::shared_ptr<WrappingPathSubsystem> subsystem = nullptr;
+        WrappingPathIndex          index {};
 
-    std::vector<WrapObstacle> obstacles {};
+        std::vector<WrapObstacle> obstacles {};
 
-    // TOPOLOGY CACHE (set during realizeTopology())
-    DiscreteVariableIndex       posInfoIx;
-    DiscreteVariableIndex       velInfoIx;
-    DiscreteVariableIndex       vizInfoIx;
+        // TOPOLOGY CACHE (set during realizeTopology())
+        DiscreteVariableIndex       posInfoIx;
+        DiscreteVariableIndex       velInfoIx;
+        DiscreteVariableIndex       vizInfoIx;
+};
+
+//==============================================================================
+//                         SUBSYSTEM :: IMPL
+//==============================================================================
+class WrappingPathSubsystem::Impl : public Subsystem::Guts {
+    public:
+        Impl() {}
+        ~Impl() {}
+        Impl* cloneImpl() const override 
+        {   return new Impl(*this); }
+
+        int getNumPaths() const {return paths.size();}
+
+        const WrappingPath& getCablePath(WrappingPathIndex index) const 
+        {   return paths[index]; }
+
+        WrappingPath& updCablePath(WrappingPathIndex index) 
+        {   return paths[index]; }
+
+        // Add a cable path to the list, bumping the reference count.
+        WrappingPathIndex adoptCablePath(WrappingPath& path) {
+            paths.push_back(path);
+            return WrappingPathIndex(paths.size()-1);
+        }
+
+        // Return the MultibodySystem which owns this WrappingPathSubsystem.
+        const MultibodySystem& getMultibodySystem() const 
+        {   return MultibodySystem::downcast(getSystem()); }
+
+        // Return the SimbodyMatterSubsystem from which this WrappingPathSubsystem
+        // gets the bodies to track.
+        const SimbodyMatterSubsystem& getMatterSubsystem() const 
+        {   return getMultibodySystem().getMatterSubsystem(); }
+
+        // Allocate state variables.
+        int realizeSubsystemTopologyImpl(State& state) const override {
+            // Briefly allow writing into the Topology cache; after this the
+            // Topology cache is const.
+            Impl* wThis = const_cast<Impl*>(this);
+
+            for (WrappingPathIndex ix(0); ix < paths.size(); ++ix) {
+                WrappingPath& path = wThis->updCablePath(ix);
+                path.updImpl().realizeTopology(state);
+            }
+
+            return 0;
+        }
+
+        int realizeSubsystemInstanceImpl(const State& state) const override {
+            for (WrappingPathIndex ix(0); ix < paths.size(); ++ix) {
+                const WrappingPath& path = getCablePath(ix);
+                path.getImpl().realizeInstance(state);
+            }
+            return 0;
+        }
+
+        int realizeSubsystemPositionImpl(const State& state) const override {
+            for (WrappingPathIndex ix(0); ix < paths.size(); ++ix) {
+                const WrappingPath& path = getCablePath(ix);
+                path.getImpl().realizePosition(state);
+            }
+            return 0;
+        }
+
+        int realizeSubsystemVelocityImpl(const State& state) const override {
+            for (WrappingPathIndex ix(0); ix < paths.size(); ++ix) {
+                const WrappingPath& path = getCablePath(ix);
+                path.getImpl().realizeVelocity(state);
+            }
+            return 0;
+        }
+
+
+        int realizeSubsystemAccelerationImpl(const State& state) const override {
+            for (WrappingPathIndex ix(0); ix < paths.size(); ++ix) {
+                const WrappingPath& path = getCablePath(ix);
+                path.getImpl().realizeAcceleration(state);
+            }
+            return 0;
+        }
+
+        SimTK_DOWNCAST(Impl, Subsystem::Guts);
+
+    private:
+        // TOPOLOGY STATE
+        Array_<WrappingPath, WrappingPathIndex> paths;
 };
 
 } // namespace SimTK
