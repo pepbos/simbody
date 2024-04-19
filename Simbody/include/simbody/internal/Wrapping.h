@@ -226,16 +226,8 @@ class WrappingPath::Impl {
             std::vector<LineSegment> lines;
 
             size_t loopIter = 0;
-        };
 
-        struct VizInfo
-        {
-            std::vector<std::pair<Vec3, UnitVec3>> points {};
-        };
-
-        struct VelInfo
-        {
-            Real lDot = NaN;
+            // TODO solver matrices
         };
 
         std::vector<WrapObstacle>& updObstacles() {return m_Obstacles;}
@@ -250,18 +242,12 @@ class WrappingPath::Impl {
         {   if (m_Subsystem) m_Subsystem->invalidateSubsystemTopologyCache(); }
 
         const PosInfo& getPosInfo(const State& state) const;
-        const VelInfo& getVelInfo(const State& state) const;
-        const VizInfo& getVizInfo(const State& state) const;
 
     private:
 
         PosInfo& updPosInfo(const State& state) const;
-        VelInfo& updVelInfo(const State& state) const;
-        VizInfo& updVizInfo(const State& state) const;
 
         void calcPosInfo(PosInfo& posInfo) const;
-        void calcVelInfo(const PosInfo& posInfo, VelInfo& velInfo) const;
-        void calcVizInfo(const PosInfo& posInfo, VizInfo& vizInfo) const;
 
         void calcPath(State& state, bool preventLiftOff = false) const;
         void calcInitPath(State& state, std::function<Vec3(WrapObstacleIndex)> pointHints);

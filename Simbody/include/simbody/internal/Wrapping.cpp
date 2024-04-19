@@ -11,12 +11,6 @@ void WrappingPath::Impl::realizeTopology(State &state)
 {
 	PosInfo posInfo {};
 	m_PosInfoIx = m_Subsystem->allocateCacheEntry(state, Stage::Position, new Value<PosInfo>(posInfo));
-
-	VelInfo velInfo {};
-	m_VelInfoIx = m_Subsystem->allocateCacheEntry(state, Stage::Velocity, new Value<VelInfo>(velInfo));
-
-	VizInfo vizInfo {};
-	m_VizInfoIx = m_Subsystem->allocateCacheEntry(state, Stage::Position, new Value<VizInfo>(vizInfo));
 }
 
 void WrappingPath::Impl::realizePosition(const State &state) const
