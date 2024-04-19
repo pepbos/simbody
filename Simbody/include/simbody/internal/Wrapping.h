@@ -170,6 +170,12 @@ public:
 
     const LocalGeodesicInfo& calcInitZeroLengthGeodesicGuess(State& s, Vec3 xPrev) const;
 
+    bool isPointBelowSurface(const State& state, Vec3 point) const;
+
+	const Transform& getSurfaceToBaseTransform(const state& state) const;
+
+    Surface getSurface() const;
+
     const PosInfo& getGeodesic(const State& state) const;
 
     Vec3 getInitialPointGuess() const;
@@ -260,6 +266,11 @@ class WrappingPathImpl {
 
             std::vector<LineSegment> lines;
 
+            Vector pathError {};
+            Matrix pathMatrix {};
+            Matrix pathErrorJacobian {};
+            Vector pathCorrections {};
+
             size_t loopIter = 0;
 
             // TODO solver matrices
@@ -278,17 +289,30 @@ class WrappingPathImpl {
 
         void calcInitZeroLengthGeodesicSegmentsGuess(State& s) const;
 
+        void callCurrentWithPrevAndNext(
+                const State& s,
+                std::function<void(size_t prevActiveIdx, size_t currentIdx, size_t nextActiveIdx)> f);
+
+        void callCurrentWithPrevAndNext(
+                const State& s,
+                std::function<void(Vec3 x_O, const WrapObstacle& o, Vec3 x_I)> f) const;
+
     private:
-        PosInfo& updPosInfo(const State& state) const;
-        void calcPosInfo(PosInfo& posInfo) const;
+        PosInfo& updPosInfo(const State& s) const;
+        void calcPosInfo(const State& s, PosInfo& posInfo) const;
 
         WrappingPathSubsystem m_Subsystem;
+
         MobilizedBody m_OriginBody;
         Vec3 m_OriginPoint;
+
         MobilizedBody m_TerminationBody;
         Vec3 m_TerminationPoint;
 
         std::vector<WrapObstacle> m_Obstacles {};
+
+        Real m_PathErrorBound = 0.1;
+        size_t m_MaxIter = 10;
 
         // TOPOLOGY CACHE (set during realizeTopology())
         CacheEntryIndex       m_PosInfoIx;

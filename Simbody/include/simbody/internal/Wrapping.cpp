@@ -1,3 +1,4 @@
+#include "SimTKcommon/internal/CoordinateAxis.h"
 #include "SimTKmath.h"
 #include "Wrapping.h"
 #include "simmath/internal/ContactGeometry.h"
@@ -16,6 +17,7 @@ using LineSegment = WrappingPathImpl::LineSegment;
 using PointVariation = ContactGeometry::GeodesicPointVariation;
 using FrameVariation = ContactGeometry::GeodesicFrameVariation;
 using Variation = ContactGeometry::GeodesicVariation;
+using Correction = ContactGeometry::GeodesicCorrection;
 
 using Geodesic = WrapObstacle::PosInfo;
 using LocalGeodesic = WrapObstacle::LocalGeodesicInfo;
@@ -286,6 +288,8 @@ void calcPathErrorJacobian(
     MapWithPrevAndNext(s, obs, f);
 }
 
+void calcPathCorrections(const State& s, const std::vector<WrapObstacle>& obs, const Vector& pathError, const Matrix& pathErrorJacobian, Matrix& pathMatrix, Vector& pathCorrections);
+
 double calcPathLength(
 	const State& s,
     const std::vector<WrapObstacle>& obs,
@@ -430,9 +434,77 @@ WrappingPath::Impl::PosInfo& WrappingPath::Impl::updPosInfo(const State &state) 
     return Value<PosInfo>::updDowncast(m_Subsystem.updCacheEntry(state, m_PosInfoIx));
 }
 
-void WrappingPath::Impl::calcPosInfo(PosInfo& posInfo) const
+bool WrapObstacle::isPointBelowSurface(const State& state, Vec3 point) const
 {
-	throw std::runtime_error("NOTYETIMPLEMENTED");
+	const Transform& X_BS = getSurfaceToBaseTransform(state);
+	return m_Surface.getGeometry().calcSurfaceValue(X_BS.shiftBaseStationToFrame(point)) < 0.;
+}
+
+void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo, bool preventLiftOff = false) const
+{
+	// Path oigin and termination points.
+	Vec3 x_O = m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
+	Vec3 x_I = m_TerminationBody.getBodyTransform(s).shiftFrameStationToBase(m_TerminationPoint);
+
+	// Helper for detecting if start/end points lie inside the surfacce.
+	std::function<void(Vec3, const WrapObstacle&, Vec3)> DetectInsideSurfaceError =
+		[&](Vec3 x_O, const WrapObstacle& obstacle, Vec3 x_I) { // TODO also supply the status.
+			// Check that previous point does not lie inside the surface.
+			if (obstacle.isPointBelowSurface(s, x_O)) {
+				throw std::runtime_error("Start point lies inside the surface");
+			}
+
+			// Check that next point does not lie inside the surface.
+			if (obstacle.isPointBelowSurface(s, x_I)) {
+				throw std::runtime_error("End point lies inside the surface");
+			}
+
+			if (preventLiftOff) {
+				return;
+			}
+
+			// TODO detect touhdown
+			// TODO detect liftoff
+			throw std::runtime_error("NOTYETIMPLEMENTED");
+		};
+
+    for (posInfo.loopIter = 0; posInfo.loopIter < m_MaxIter; ++posInfo.loopIter) {
+
+        // Detect touchdown & liftoff.
+		// doForEachObjectWithPrevAndNextPoint(UpdateLiftoffAndTouchdown)
+		callCurrentWithPrevAndNext(s, DetectInsideSurfaceError);
+
+        // Compute the line segments.
+        calcLineSegments(s, x_O, x_I, m_Obstacles, posInfo.lines);
+
+        calcPathError(s, m_Obstacles, posInfo.lines, posInfo.pathError);
+
+        const Real maxPathError = posInfo.pathError.normInf();
+
+        // Evaluate path error, and stop when converged.
+        if (maxPathError < m_PathErrorBound) {
+            return;
+        }
+
+        // Evaluate the path error jacobian.
+        calcPathErrorJacobian(s, m_Obstacles, posInfo.lines, posInfo.pathErrorJacobian);
+
+        // Compute path corrections.
+        calcPathCorrections(s, m_Obstacles, posInfo.pathError, posInfo.pathErrorJacobian, posInfo.pathMatrix, posInfo.pathCorrections);
+
+        // Apply path corrections.
+		throw std::runtime_error("NOTYETIMPLEMENTED");
+		const Correction* corrIt = nullptr; // TODO
+        for (const WrapObstacle& obstacle : m_Obstacles) {
+            if (!obstacle.isActive(s)) {
+                continue;
+            }
+            obstacle.applyGeodesicCorrection(s, *corrIt);
+            ++corrIt;
+        }
+    }
+
+	throw std::runtime_error("Failed to converge");
 }
 
 //==============================================================================
