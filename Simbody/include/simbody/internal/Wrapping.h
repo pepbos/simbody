@@ -6,6 +6,7 @@
 #include "simbody/internal/common.h"
 #include "simmath/internal/ContactGeometry.h"
 #include <functional>
+#include <stdexcept>
 
 namespace SimTK
 {
@@ -17,26 +18,37 @@ class MultibodySystem;
 class WrappingPathSubsystem;
 class WrapObstacle;
 
-// TODO where to put decorations?
-
-// WrapObstacle: PIMPL - not copy
-//  - only one
-//  - Impl:
-//      - has virtual methods
-//
-// AnalyticWrapObstacle: WrapObstacle
-//  - has cache
-// ImplicitWrapObstacle: WrapObstacle
-//  - has cache
-//
-// Surface: PIMPL
-//  - ContactGeometry
-//  - BodyIndex
-//  - Transform
-
 //==============================================================================
 //                      SURFACE
 //==============================================================================
+class SurfaceImpl {
+
+private:
+    SurfaceImpl()                              = default;
+public:
+    ~SurfaceImpl() = default;
+    SurfaceImpl(SurfaceImpl&&) noexcept            = default;
+    SurfaceImpl& operator=(SurfaceImpl&&) noexcept = default;
+    SurfaceImpl(const SurfaceImpl&)                = default;
+    SurfaceImpl& operator=(const SurfaceImpl&)     = default;
+
+    SurfaceImpl(MobilizedBody mobod, Transform X_BS, ContactGeometry geometry) :
+        m_Mobod(std::move(mobod)),
+        m_Offset(std::move(X_BS)),
+        m_Geometry(geometry) {}
+
+    const ContactGeometry& getGeometry() const {return m_Geometry;}
+    Transform calcSurfaceToGroundTransform(const State& state) const
+    { throw std::runtime_error("check transform order");
+        return 
+        m_Mobod.getBodyTransform(state).compose(m_Offset);}
+
+private:
+    MobilizedBody m_Mobod;
+    Transform m_Offset;
+    ContactGeometry m_Geometry;
+};
+
 // Binds {ContactGeometry, Body, OffsetFrame}
 // Cheap to copy, reuseable in the model.
 class SimTK_SIMBODY_EXPORT Surface
@@ -58,31 +70,8 @@ public:
 private:
 
     //--------------------------------------------------------------------------
-    class Impl;
-    explicit Surface(std::shared_ptr<Impl> impl);
-    std::shared_ptr<Impl> impl = nullptr;
-};
-
-class Surface::Impl {
-    typedef Surface::Impl Super;
-private:
-    Impl()                              = default;
-public:
-    ~Impl() = default;
-    Impl(Impl&&) noexcept            = default;
-    Impl& operator=(Impl&&) noexcept = default;
-    Impl(const Impl&)                = default;
-    Impl& operator=(const Impl&)     = default;
-
-    Impl(const MobilizedBody& mobod, const Transform& X_BS, const ContactGeometry& geometry);
-
-    const ContactGeometry& getGeometry() const;
-    const Transform& calcSurfaceToGroundTransform(const State& state) const;
-
-private:
-    ContactGeometry geometry;
-    MobilizedBody mobod;
-    Transform offset;
+    explicit Surface(std::shared_ptr<SurfaceImpl> impl);
+    std::shared_ptr<SurfaceImpl> impl = nullptr;
 };
 
 //==============================================================================
