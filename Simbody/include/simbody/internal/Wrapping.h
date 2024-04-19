@@ -118,6 +118,14 @@ public:
 
     explicit WrapObstacle(Surface surface);
 
+    enum class Status
+    {
+        Ok,
+        NegativeLength,
+        Liftoff,
+        Disabled,
+    };
+
     // Ground frame solution.
     struct PosInfo
     {
@@ -145,6 +153,8 @@ public:
         double sHint = NaN;
 
         double lineTracking = NaN;
+
+        Status status = Status::Ok;
     };
 
     // Allocate state variables and cache entries.
@@ -155,7 +165,14 @@ public:
     void realizeAcceleration(const State& state) const;
     void invalidateTopology();
 
-    const PosInfo& getPosInfo(const State& state) const;
+    Status getStatus(const State& state) const;
+    bool isActive(const State& state) const;
+
+    const LocalGeodesicInfo& calcInitZeroLengthGeodesicGuess(State& s, Vec3 xPrev) const;
+
+    const PosInfo& getGeodesic(const State& state) const;
+
+    Vec3 getInitialPointGuess() const;
 
     WrapObstacle::PosInfo& updPosInfo(const State &state) const
     {
@@ -258,6 +275,9 @@ class WrappingPathImpl {
         {   m_Subsystem.invalidateSubsystemTopologyCache(); }
 
         const PosInfo& getPosInfo(const State& state) const;
+
+        void calcInitZeroLengthGeodesicSegmentsGuess(State& s) const;
+
     private:
         PosInfo& updPosInfo(const State& state) const;
         void calcPosInfo(PosInfo& posInfo) const;
