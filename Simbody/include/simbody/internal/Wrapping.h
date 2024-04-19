@@ -209,6 +209,17 @@ private:
 //==============================================================================
 class WrappingPath::Impl {
     public:
+        Impl(
+                WrappingPathSubsystem subsystem,
+                MobilizedBody originBody,
+                Vec3 originPoint,
+                MobilizedBody terminationBody,
+                Vec3 terminationPoint):
+            m_Subsystem(subsystem),
+            m_OriginBody(originBody),
+            m_OriginPoint(originPoint),
+            m_TerminationBody(terminationBody),
+            m_TerminationPoint(terminationPoint) {}
 
         struct LineSegment
         {
@@ -236,24 +247,20 @@ class WrappingPath::Impl {
         // Allocate state variables and cache entries.
         void realizeTopology(State& state);
         void realizePosition(const State& state) const;
-        void realizeVelocity(const State& state) const;
-        void realizeAcceleration(const State& state) const;
         void invalidateTopology()
-        {   if (m_Subsystem) m_Subsystem->invalidateSubsystemTopologyCache(); }
+        {   m_Subsystem.invalidateSubsystemTopologyCache(); }
 
         const PosInfo& getPosInfo(const State& state) const;
-
     private:
-
         PosInfo& updPosInfo(const State& state) const;
-
         void calcPosInfo(PosInfo& posInfo) const;
 
-        void calcPath(State& state, bool preventLiftOff = false) const;
-        void calcInitPath(State& state, std::function<Vec3(WrapObstacleIndex)> pointHints);
 
-        std::shared_ptr<WrappingPathSubsystem> m_Subsystem = nullptr;
-        WrappingPathIndex          m_Index {};
+        WrappingPathSubsystem m_Subsystem;
+        MobilizedBody m_OriginBody;
+        Vec3 m_OriginPoint;
+        MobilizedBody m_TerminationBody;
+        Vec3 m_TerminationPoint;
 
         std::vector<WrapObstacle> m_Obstacles {};
 
