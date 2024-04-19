@@ -175,41 +175,11 @@ public:
 };
 
 //==============================================================================
-//                                PATH
-//==============================================================================
-class SimTK_SIMBODY_EXPORT WrappingPath
-{
-public:
-    WrappingPath(
-        WrappingPathSubsystem& subsystem,
-        const MobilizedBody& originBody,
-        const Vec3& defaultOriginPoint,
-        const MobilizedBody& terminationBody,
-        const Vec3& defaultTerminationPoint);
-
-    int getNumObstacles() const;
-    const WrapObstacle& getObstacle(WrapObstacleIndex obstacleIx) const;
-    WrapObstacleIndex adoptObstacle(WrapObstacle);
-
-    Real getLength(const State& state) const;
-
-    class Impl;
-
-private:
-    friend WrappingPathSubsystem::Impl;
-
-    const Impl& getImpl() const;
-    Impl& updImpl();
-
-    std::shared_ptr<Impl> impl = nullptr;
-};
-
-//==============================================================================
 //                         PATH :: IMPL
 //==============================================================================
-class WrappingPath::Impl {
+class WrappingPathImpl {
     public:
-        Impl(
+        WrappingPathImpl(
                 WrappingPathSubsystem subsystem,
                 MobilizedBody originBody,
                 Vec3 originPoint,
@@ -270,6 +240,35 @@ class WrappingPath::Impl {
         CacheEntryIndex       m_VizInfoIx;
 
         friend class WrappingPath;
+};
+
+//==============================================================================
+//                                PATH
+//==============================================================================
+class SimTK_SIMBODY_EXPORT WrappingPath
+{
+public:
+    using Impl = WrappingPathImpl;
+
+    WrappingPath(
+        WrappingPathSubsystem& subsystem,
+        const MobilizedBody& originBody,
+        const Vec3& defaultOriginPoint,
+        const MobilizedBody& terminationBody,
+        const Vec3& defaultTerminationPoint);
+
+    std::vector<WrapObstacle>& updObstacles() {return updImpl().updObstacles();}
+    const std::vector<WrapObstacle>& getObstacles() const {return getImpl().getObstacles();}
+
+    Real getLength(const State& state) const {return getImpl().getPosInfo(state).l; }
+
+private:
+    friend WrappingPathSubsystem::Impl;
+
+    const Impl& getImpl() const { return *impl; }
+    Impl& updImpl() { return *impl; }
+
+    std::shared_ptr<Impl> impl = nullptr;
 };
 
 //==============================================================================
