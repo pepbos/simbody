@@ -107,7 +107,6 @@ public:
     using FrenetFrame = ContactGeometry::FrenetFrame;
     using Variation = ContactGeometry::GeodesicVariation;
     using Correction = ContactGeometry::GeodesicCorrection;
-    using BoundaryFrameVariation  = WrapObstacle::Correction;
 
 private:
     WrapObstacle()                                      = default;
@@ -119,20 +118,6 @@ public:
 
     explicit WrapObstacle(Surface surface);
 
-    // Solution previously commputed, all in local surface frame coordinates.
-    struct WarmStartInfo
-    {
-        FrenetFrame KP {};
-        FrenetFrame KQ {};
-
-        Real length = NaN;
-
-        BoundaryFrameVariation dKP {};
-        BoundaryFrameVariation dKQ {};
-
-        std::vector<Vec3> points {};
-    };
-
     // Ground frame solution.
     struct PosInfo
     {
@@ -141,8 +126,25 @@ public:
 
         Real length = NaN;
 
-        BoundaryFrameVariation dKP {};
-        BoundaryFrameVariation dKQ {};
+        Variation dKP {};
+        Variation dKQ {};
+    };
+
+    // Solution previously commputed, all in local surface frame coordinates.
+    struct LocalGeodesicInfo
+    {
+        FrenetFrame KP {};
+        FrenetFrame KQ {};
+
+        Real length = NaN;
+
+        Variation dKP {};
+        Variation dKQ {};
+
+        std::vector<Vec3> points {};
+        double sHint = NaN;
+
+        double lineTracking = NaN;
     };
 
     // Allocate state variables and cache entries.
@@ -154,25 +156,58 @@ public:
     void invalidateTopology();
 
     const PosInfo& getPosInfo(const State& state) const;
-    PosInfo& updPosInfo(const State& state) const;
+
+    WrapObstacle::PosInfo& updPosInfo(const State &state) const
+    {
+        return Value<PosInfo>::updDowncast(m_Subsystem.updCacheEntry(state, m_PosInfoIx));
+    }
 
     size_t writeGeodesicPoints(const State& state, std::vector<Vec3> points) const;
-    void applyCorrection(const State& state) const;
+    void applyGeodesicCorrection(const State& state, const WrapObstacle::Correction& c) const;
 
 private:
-    const WarmStartInfo& getWarmStartInfo(const State& state) const;
-    WarmStartInfo& updWarmStartInfo(const State& state) const;
+    const LocalGeodesicInfo& getLocalGeodesicInfo(const State& state) const
+    {
+        realizePosition(state);
+        return Value<LocalGeodesicInfo>::downcast(
+                m_Subsystem.getDiscreteVarUpdateValue(state, m_WarmStartInfoDIx)
+                );
+    }
 
-    void calcPosInfo(PosInfo& posInfo) const;
+    LocalGeodesicInfo& updLocalGeodesicInfo(const State& state) const
+    {
+        return Value<LocalGeodesicInfo>::updDowncast(
+                m_Subsystem.updDiscreteVarUpdateValue(state, m_WarmStartInfoDIx)
+                );
+    }
+
+    const LocalGeodesicInfo& getPrevLocalGeodesicInfo(const State& state) const
+    {
+        return Value<LocalGeodesicInfo>::downcast(
+                m_Subsystem.getDiscreteVariable(state, m_WarmStartInfoDIx)
+                );
+    }
+
+    LocalGeodesicInfo& updPrevLocalGeodesicInfo(State& state) const
+    {
+        return Value<LocalGeodesicInfo>::updDowncast(
+                m_Subsystem.updDiscreteVariable(state, m_WarmStartInfoDIx)
+                );
+    }
+
+    void calcLocalGeodesic(Vec3 x, Vec3 t, Real l, Real sHint,
+            WrapObstacle::LocalGeodesicInfo& geodesic) const;
+    void calcPosInfo(const State& state,
+		const WrapObstacle::LocalGeodesicInfo& localGeodesic,
+		PosInfo& posInfo) const;
+
+    Surface m_Surface;
 
     // Required for accessing the discrete variable?
     WrappingPathSubsystem m_Subsystem;
 
-    std::vector<WrapObstacle> obstacles {};
-
     // TOPOLOGY CACHE (set during realizeTopology())
     DiscreteVariableIndex       m_WarmStartInfoDIx;
-    CacheEntryIndex       m_WarmStartInfoIx;
     CacheEntryIndex       m_PosInfoIx;
 };
 

@@ -1,5 +1,6 @@
 #include "SimTKmath.h"
 #include "Wrapping.h"
+#include "simmath/internal/ContactGeometry.h"
 #include <stdexcept>
 
 using namespace SimTK;
@@ -94,9 +95,8 @@ void WrappingPath::Impl::calcPosInfo(PosInfo& posInfo) const
 void WrapObstacle::realizeTopology(State &state)
 {
 	// Allocate an auto-update discrete variable for the last computed geodesic.
-	WarmStartInfo warmStartInfo {};
-	m_WarmStartInfoDIx = m_Subsystem.allocateAutoUpdateDiscreteVariable(state, Stage::Velocity, new Value<WarmStartInfo>(warmStartInfo), Stage::Position);
-	m_WarmStartInfoIx = m_Subsystem.getDiscreteVarUpdateIndex(state, m_WarmStartInfoDIx);
+	LocalGeodesicInfo warmStartInfo {};
+	m_WarmStartInfoDIx = m_Subsystem.allocateAutoUpdateDiscreteVariable(state, Stage::Velocity, new Value<LocalGeodesicInfo>(warmStartInfo), Stage::Position);
 
 	// Allocate position level cache.
 	PosInfo posInfo {};
@@ -105,24 +105,121 @@ void WrapObstacle::realizeTopology(State &state)
 
 void WrapObstacle::realizePosition(const State &state) const
 {
-	if (m_Subsystem.isCacheValueRealized(state, m_PosInfoIx)) {return;}
-	calcPosInfo(updPosInfo(state));
-	m_Subsystem.markCacheValueRealized(state, m_PosInfoIx);
+	// Set the current local geodesic equal to the previous.
+	if (!m_Subsystem.isDiscreteVarUpdateValueRealized(state, m_WarmStartInfoDIx)) {
+		updLocalGeodesicInfo(state) = getPrevLocalGeodesicInfo(state);
+		m_Subsystem.markDiscreteVarUpdateValueRealized(state, m_WarmStartInfoDIx);
+	}
 }
 
 const WrapObstacle::PosInfo& WrapObstacle::getPosInfo(const State &state) const
 {
-	realizePosition(state);
+	if (!m_Subsystem.isCacheValueRealized(state, m_PosInfoIx)) {
+		calcPosInfo(state, getLocalGeodesicInfo(state), updPosInfo(state));
+		m_Subsystem.markCacheValueRealized(state, m_PosInfoIx);
+	}
     return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(state, m_PosInfoIx));
 }
 
-WrapObstacle::PosInfo& WrapObstacle::updPosInfo(const State &state) const
+namespace
 {
-    return Value<PosInfo>::updDowncast(m_Subsystem.updCacheEntry(state, m_PosInfoIx));
+	Vec3 calcCorrectedGeodesicStartPoint(
+			const ContactGeometry::GeodesicCorrection& c,
+			const ContactGeometry::GeodesicVariation& dKP,
+			const ContactGeometry::FrenetFrame& KP
+			)
+	{
+		Vec3 v = dKP[1] * c;
+		return KP.p() + v;
+	}
+
+	Vec3 calcCorrectedGeodesicStartTangent(
+			const ContactGeometry::GeodesicCorrection& c,
+			const ContactGeometry::GeodesicVariation& dKP,
+			const ContactGeometry::FrenetFrame& KP
+			)
+	{
+		Vec3 w = dKP[0] * c;
+		const UnitVec3 t = KP.R().getAxisUnitVec(ContactGeometry::TangentAxis);
+		return t + cross(w, t);
+	}
+
+	double calcCorrectedGeodesicLength(
+			const ContactGeometry::GeodesicCorrection& c,
+			Real length)
+	{
+		return length + c[3];
+	}
+
+	void xformSurfaceGeodesicToBase(
+			const WrapObstacle::LocalGeodesicInfo& geodesic_S,
+			WrapObstacle::PosInfo& geodesic_B,
+			Transform& X_BS) {
+
+		// TODO check transformation order.
+		geodesic_B.KP = X_BS.compose(geodesic_S.KP);
+		geodesic_B.KQ = X_BS.compose(geodesic_S.KQ);
+
+		geodesic_B.dKP[0] = X_BS.R() * geodesic_S.dKP[0];
+		geodesic_B.dKP[1] = X_BS.R() * geodesic_S.dKP[1];
+
+		geodesic_B.dKQ[0] = X_BS.R() * geodesic_S.dKQ[0];
+		geodesic_B.dKQ[1] = X_BS.R() * geodesic_S.dKQ[1];
+
+		geodesic_B.length = geodesic_S.length;
+
+		throw std::runtime_error("NOTYETIMPLEMENTED: Check transformation order");
+	}
 }
 
-void WrapObstacle::calcPosInfo(PosInfo& posInfo) const
+void WrapObstacle::applyGeodesicCorrection(const State& state, const WrapObstacle::Correction& c) const
 {
+	// Get prev geodesic.
+	const LocalGeodesicInfo& geodesic = getLocalGeodesicInfo(state);
+
+	// Apply geodesic correction.
+	Vec3 x = calcCorrectedGeodesicStartPoint(c, geodesic.dKP, geodesic.KP);
+	Vec3 t = calcCorrectedGeodesicStartTangent(c, geodesic.dKP, geodesic.KP);
+	Real l = calcCorrectedGeodesicLength(c, geodesic.length);
+	Real sHint = geodesic.sHint;
+
+	// Shoot the new geodesic.
+	calcLocalGeodesic(x, t, l, sHint, updLocalGeodesicInfo(state));
+
+	// Invalidate position level cache.
+	m_Subsystem.markCacheValueNotRealized(state, m_PosInfoIx);
+}
+
+void WrapObstacle::calcLocalGeodesic( Vec3 x, Vec3 t, Real l, Real sHint,
+		WrapObstacle::LocalGeodesicInfo& geodesic) const
+{
+	const ContactGeometry& geometry = m_Surface.getGeometry();
+
+	// Compute geodesic start boundary frame.
+	geometry.calcNearestFrenetFrameFast(x, t, geodesic.KP);
+	geometry.calcGeodesicStartFrameVariation(geodesic.KP, geodesic.dKP);
+
+	// Compute geodesic end boundary frame (shoot new geodesic).
+	geometry.calcGeodesicEndFrameVariationImplicitly(
+			geodesic.KP.p(),
+			geodesic.KP.R().getAxisUnitVec(ContactGeometry::TangentAxis),
+			l,
+			sHint,
+			geodesic.KQ,
+			geodesic.dKQ,
+			geodesic.points);
+
+	// TODO  update step size.
+	// TODO  update line tracking?
 	throw std::runtime_error("NOTYETIMPLEMENTED");
 }
 
+void WrapObstacle::calcPosInfo(
+		const State& state,
+		const WrapObstacle::LocalGeodesicInfo& localGeodesic,
+		PosInfo& posInfo) const
+{
+	// Transform the local geodesic to ground frame.
+	Transform X_BS = m_Surface.calcSurfaceToGroundTransform(state);
+	xformSurfaceGeodesicToBase(localGeodesic, posInfo, X_BS);
+}
