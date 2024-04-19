@@ -76,6 +76,27 @@ private:
 };
 
 //==============================================================================
+//                                SUBSYSTEM
+//==============================================================================
+class WrappingPath;
+
+class SimTK_SIMBODY_EXPORT WrappingPathSubsystem : public Subsystem
+{
+public:
+    WrappingPathSubsystem();
+    explicit WrappingPathSubsystem(MultibodySystem&);
+
+    int getNumPaths() const;
+    const WrappingPath& getPath(WrappingPathIndex idx) const;
+    WrappingPath& updPath(WrappingPathIndex idx);
+
+    SimTK_PIMPL_DOWNCAST(WrappingPathSubsystem, Subsystem);
+    class Impl;
+    Impl& updImpl();
+    const Impl& getImpl() const;
+};
+
+//==============================================================================
 //                                OBSTACLE
 //==============================================================================
 // Although cheap to copy, we cannot hand them out because they have a cache entry associated with them.
@@ -141,37 +162,18 @@ public:
 private:
     const WarmStartInfo& getWarmStartInfo(const State& state) const;
     WarmStartInfo& updWarmStartInfo(const State& state) const;
+
     void calcPosInfo(PosInfo& posInfo) const;
 
     // Required for accessing the discrete variable?
-    std::shared_ptr<WrappingPathSubsystem> subsystem = nullptr;
+    WrappingPathSubsystem m_Subsystem;
 
     std::vector<WrapObstacle> obstacles {};
 
     // TOPOLOGY CACHE (set during realizeTopology())
-    DiscreteVariableIndex       warmStartInfoIx;
-    DiscreteVariableIndex       posInfoIx;
-};
-
-//==============================================================================
-//                                SUBSYSTEM
-//==============================================================================
-class WrappingPath;
-
-class SimTK_SIMBODY_EXPORT WrappingPathSubsystem : public Subsystem
-{
-public:
-    WrappingPathSubsystem();
-    explicit WrappingPathSubsystem(MultibodySystem&);
-
-    int getNumPaths() const;
-    const WrappingPath& getPath(WrappingPathIndex idx) const;
-    WrappingPath& updPath(WrappingPathIndex idx);
-
-    SimTK_PIMPL_DOWNCAST(WrappingPathSubsystem, Subsystem);
-    class Impl;
-    Impl& updImpl();
-    const Impl& getImpl() const;
+    DiscreteVariableIndex       m_WarmStartInfoDIx;
+    CacheEntryIndex       m_WarmStartInfoIx;
+    CacheEntryIndex       m_PosInfoIx;
 };
 
 //==============================================================================
@@ -224,7 +226,6 @@ class WrappingPathImpl {
     private:
         PosInfo& updPosInfo(const State& state) const;
         void calcPosInfo(PosInfo& posInfo) const;
-
 
         WrappingPathSubsystem m_Subsystem;
         MobilizedBody m_OriginBody;

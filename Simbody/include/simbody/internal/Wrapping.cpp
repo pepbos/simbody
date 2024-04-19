@@ -55,7 +55,7 @@ updPath(WrappingPathIndex cableIx)
 
 
 //==============================================================================
-//            WRAPPING PATH
+//                               WRAPPING PATH
 //==============================================================================
 
 void WrappingPath::Impl::realizeTopology(State &state)
@@ -86,3 +86,43 @@ void WrappingPath::Impl::calcPosInfo(PosInfo& posInfo) const
 {
 	throw std::runtime_error("NOTYETIMPLEMENTED");
 }
+
+//==============================================================================
+//                               OBSTACLE
+//==============================================================================
+
+void WrapObstacle::realizeTopology(State &state)
+{
+	// Allocate an auto-update discrete variable for the last computed geodesic.
+	WarmStartInfo warmStartInfo {};
+	m_WarmStartInfoDIx = m_Subsystem.allocateAutoUpdateDiscreteVariable(state, Stage::Velocity, new Value<WarmStartInfo>(warmStartInfo), Stage::Position);
+	m_WarmStartInfoIx = m_Subsystem.getDiscreteVarUpdateIndex(state, m_WarmStartInfoDIx);
+
+	// Allocate position level cache.
+	PosInfo posInfo {};
+	m_PosInfoIx = m_Subsystem.allocateCacheEntry(state, Stage::Position, new Value<PosInfo>(posInfo));
+}
+
+void WrapObstacle::realizePosition(const State &state) const
+{
+	if (m_Subsystem.isCacheValueRealized(state, m_PosInfoIx)) {return;}
+	calcPosInfo(updPosInfo(state));
+	m_Subsystem.markCacheValueRealized(state, m_PosInfoIx);
+}
+
+const WrapObstacle::PosInfo& WrapObstacle::getPosInfo(const State &state) const
+{
+	realizePosition(state);
+    return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(state, m_PosInfoIx));
+}
+
+WrapObstacle::PosInfo& WrapObstacle::updPosInfo(const State &state) const
+{
+    return Value<PosInfo>::updDowncast(m_Subsystem.updCacheEntry(state, m_PosInfoIx));
+}
+
+void WrapObstacle::calcPosInfo(PosInfo& posInfo) const
+{
+	throw std::runtime_error("NOTYETIMPLEMENTED");
+}
+
