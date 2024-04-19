@@ -118,6 +118,52 @@ class Cylinder;
 class Brick;
 class TriangleMesh;
 
+
+using FrenetFrame = Transform;
+
+static const CoordinateAxis TangentAxis;
+static const CoordinateAxis NormalAxis;
+static const CoordinateAxis BinormalAxis;
+
+static constexpr int GEODESIC_DOF = 4;
+
+using GeodesicPointVariation = Mat34;
+using GeodesicFrameVariation = Mat34;
+using GeodesicVariation = std::array<Mat34, 2>;
+using GeodesicCorrection = Vec4;
+
+struct GeodesicBoundaryFrame {
+    FrenetFrame K_P{};
+    FrenetFrame K_Q{};
+
+    GeodesicVariation v_P{};
+    GeodesicVariation v_Q{};
+};
+
+void calcNearestFrenetFrameFast(Vec3 x, Vec3 thint, FrenetFrame& X_BP) const;
+void calcGeodesicStartFrameVariation(const FrenetFrame& X_BP, GeodesicVariation& dX_BP) const;
+void calcGeodesicEndFrameVariationImplicitly(
+        Vec3 x,
+        UnitVec3 t, Real l, Real sHint,
+        FrenetFrame& X_BQ,
+        GeodesicVariation& dX_BQ,
+        std::vector<Vec3>& points) const;
+void calcGeodesicEndFrameVariationAnalytically(        Vec3 x,
+        UnitVec3 t, Real l,
+        FrenetFrame& X_BQ,
+        GeodesicVariation& dX_BQ) const;
+void calcGeodesicPointsAnalytically(Vec3 x, UnitVec3 t, Real l, std::vector<Vec3>& points);
+bool analyticFormAvailable() const;
+
+struct PointOnLineResult
+{
+    Vec3 p {NaN, NaN, NaN};
+    bool isInsideSurface = false;
+    size_t iter = 0;
+};
+
+PointOnLineResult calcNearestPointOnLine(Vec3 a, Vec3 b, Vec3 hint, size_t maxIter, double eps);
+
 // TODO
 class Cone;
 

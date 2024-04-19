@@ -6,6 +6,90 @@
 using namespace SimTK;
 
 //==============================================================================
+//                                SOME MATH
+//==============================================================================
+namespace
+{
+
+using GeodesicJacobian = Vec4;
+using LineSegment = WrappingPathImpl::LineSegment;
+using PointVariation = ContactGeometry::GeodesicPointVariation;
+using FrameVariation = ContactGeometry::GeodesicFrameVariation;
+using Variation = ContactGeometry::GeodesicVariation;
+
+	Vec3 calcCorrectedGeodesicStartPoint(
+			const ContactGeometry::GeodesicCorrection& c,
+			const ContactGeometry::GeodesicVariation& dKP,
+			const ContactGeometry::FrenetFrame& KP
+			)
+	{
+		Vec3 v = dKP[1] * c;
+		return KP.p() + v;
+	}
+
+	Vec3 calcCorrectedGeodesicStartTangent(
+			const ContactGeometry::GeodesicCorrection& c,
+			const ContactGeometry::GeodesicVariation& dKP,
+			const ContactGeometry::FrenetFrame& KP
+			)
+	{
+		Vec3 w = dKP[0] * c;
+		const UnitVec3 t = KP.R().getAxisUnitVec(ContactGeometry::TangentAxis);
+		return t + cross(w, t);
+	}
+
+	double calcCorrectedGeodesicLength(
+			const ContactGeometry::GeodesicCorrection& c,
+			Real length)
+	{
+		return length + c[3];
+	}
+
+	void xformSurfaceGeodesicToBase(
+			const WrapObstacle::LocalGeodesicInfo& geodesic_S,
+			WrapObstacle::PosInfo& geodesic_B,
+			Transform& X_BS) {
+
+		// TODO check transformation order.
+		geodesic_B.KP = X_BS.compose(geodesic_S.KP);
+		geodesic_B.KQ = X_BS.compose(geodesic_S.KQ);
+
+		geodesic_B.dKP[0] = X_BS.R() * geodesic_S.dKP[0];
+		geodesic_B.dKP[1] = X_BS.R() * geodesic_S.dKP[1];
+
+		geodesic_B.dKQ[0] = X_BS.R() * geodesic_S.dKQ[0];
+		geodesic_B.dKQ[1] = X_BS.R() * geodesic_S.dKQ[1];
+
+		geodesic_B.length = geodesic_S.length;
+
+		throw std::runtime_error("NOTYETIMPLEMENTED: Check transformation order");
+	}
+
+GeodesicJacobian calcDirectionJacobian(
+    const LineSegment& e,
+    UnitVec3 axis,
+    const PointVariation& v)
+{
+    Vec3 y = axis - e.d * dot(e.d,axis);
+    y /= e.l;
+    return ~v * y;
+}
+
+GeodesicJacobian calcPathErrorJacobian(
+    const LineSegment& line,
+    UnitVec3 axis,
+    const PointVariation& v,
+    const FrameVariation& w,
+    bool invertV = false)
+{
+    GeodesicJacobian jacobian =
+        calcDirectionJacobian(line, axis, v) * (invertV ? -1. : 1.);
+    jacobian += cross(axis,line.d).transpose() * w;
+    return jacobian;
+}
+}
+
+//==============================================================================
 //            SUBSYSTEM
 //==============================================================================
 
@@ -119,57 +203,6 @@ const WrapObstacle::PosInfo& WrapObstacle::getPosInfo(const State &state) const
 		m_Subsystem.markCacheValueRealized(state, m_PosInfoIx);
 	}
     return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(state, m_PosInfoIx));
-}
-
-namespace
-{
-	Vec3 calcCorrectedGeodesicStartPoint(
-			const ContactGeometry::GeodesicCorrection& c,
-			const ContactGeometry::GeodesicVariation& dKP,
-			const ContactGeometry::FrenetFrame& KP
-			)
-	{
-		Vec3 v = dKP[1] * c;
-		return KP.p() + v;
-	}
-
-	Vec3 calcCorrectedGeodesicStartTangent(
-			const ContactGeometry::GeodesicCorrection& c,
-			const ContactGeometry::GeodesicVariation& dKP,
-			const ContactGeometry::FrenetFrame& KP
-			)
-	{
-		Vec3 w = dKP[0] * c;
-		const UnitVec3 t = KP.R().getAxisUnitVec(ContactGeometry::TangentAxis);
-		return t + cross(w, t);
-	}
-
-	double calcCorrectedGeodesicLength(
-			const ContactGeometry::GeodesicCorrection& c,
-			Real length)
-	{
-		return length + c[3];
-	}
-
-	void xformSurfaceGeodesicToBase(
-			const WrapObstacle::LocalGeodesicInfo& geodesic_S,
-			WrapObstacle::PosInfo& geodesic_B,
-			Transform& X_BS) {
-
-		// TODO check transformation order.
-		geodesic_B.KP = X_BS.compose(geodesic_S.KP);
-		geodesic_B.KQ = X_BS.compose(geodesic_S.KQ);
-
-		geodesic_B.dKP[0] = X_BS.R() * geodesic_S.dKP[0];
-		geodesic_B.dKP[1] = X_BS.R() * geodesic_S.dKP[1];
-
-		geodesic_B.dKQ[0] = X_BS.R() * geodesic_S.dKQ[0];
-		geodesic_B.dKQ[1] = X_BS.R() * geodesic_S.dKQ[1];
-
-		geodesic_B.length = geodesic_S.length;
-
-		throw std::runtime_error("NOTYETIMPLEMENTED: Check transformation order");
-	}
 }
 
 void WrapObstacle::applyGeodesicCorrection(const State& state, const WrapObstacle::Correction& c) const
