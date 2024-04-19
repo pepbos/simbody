@@ -40,8 +40,7 @@ public:
     const ContactGeometry& getGeometry() const {return m_Geometry;}
     Transform calcSurfaceToGroundTransform(const State& state) const
     { throw std::runtime_error("check transform order");
-        return 
-        m_Mobod.getBodyTransform(state).compose(m_Offset);}
+        return m_Mobod.getBodyTransform(state).compose(m_Offset);}
 
 private:
     MobilizedBody m_Mobod;
@@ -62,15 +61,13 @@ public:
     Surface(const Surface&)                = default;
     Surface& operator=(const Surface&)     = default;
 
-    Surface(const MobilizedBody& mobod, const Transform& X_BS, const ContactGeometry& geometry);
+    Surface(const MobilizedBody& mobod, const Transform& X_BS, const ContactGeometry& geometry)
+        : impl(std::make_shared<SurfaceImpl>(mobod, X_BS, geometry)) {}
 
-    const ContactGeometry& getGeometry() const;
-    const Transform& calcSurfaceToGroundTransform(const State& state) const;
+    const ContactGeometry& getGeometry() const {return impl->getGeometry();}
+    Transform calcSurfaceToGroundTransform(const State& state) const {return impl->calcSurfaceToGroundTransform(state);}
 
 private:
-
-    //--------------------------------------------------------------------------
-    explicit Surface(std::shared_ptr<SurfaceImpl> impl);
     std::shared_ptr<SurfaceImpl> impl = nullptr;
 };
 
@@ -96,16 +93,6 @@ public:
     ~WrapObstacle()                                     = default;
 
     explicit WrapObstacle(Surface surface);
-
-    const FrenetFrame& getKP(const State& state) const;
-    const FrenetFrame& getKQ(const State& state) const;
-
-    const Variation& getDKP(const State& state) const;
-    const Variation& getDKQ(const State& state) const;
-
-    double getLength(const State& state) const;
-
-    size_t writeGeodesicPoints(const State& state, std::vector<Vec3> points) const;
 
     // Solution previously commputed, all in local surface frame coordinates.
     struct WarmStartInfo
@@ -133,26 +120,24 @@ public:
         BoundaryFrameVariation dKQ {};
     };
 
-    size_t writeGeodesicPoints(const State& state, std::vector<Vec3>& points) const;
-
     // Allocate state variables and cache entries.
     void realizeTopology(State& state);
     void realizeInstance(const State& state) const;
     void realizePosition(const State& state) const;
     void realizeVelocity(const State& state) const;
     void realizeAcceleration(const State& state) const;
+    void invalidateTopology();
 
     const PosInfo& getPosInfo(const State& state) const;
     PosInfo& updPosInfo(const State& state) const;
 
+    size_t writeGeodesicPoints(const State& state, std::vector<Vec3> points) const;
+    void applyCorrection(const State& state) const;
+
 private:
     const WarmStartInfo& getWarmStartInfo(const State& state) const;
     WarmStartInfo& updWarmStartInfo(const State& state) const;
-
     void calcPosInfo(PosInfo& posInfo) const;
-
-    void invalidateTopology()
-    {   if (subsystem) subsystem->invalidateSubsystemTopologyCache(); }
 
     // Required for accessing the discrete variable?
     std::shared_ptr<WrappingPathSubsystem> subsystem = nullptr;
@@ -162,7 +147,6 @@ private:
     // TOPOLOGY CACHE (set during realizeTopology())
     DiscreteVariableIndex       warmStartInfoIx;
     DiscreteVariableIndex       posInfoIx;
-    DiscreteVariableIndex       velInfoIx;
 };
 
 //==============================================================================
