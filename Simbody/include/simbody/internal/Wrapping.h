@@ -1,6 +1,7 @@
 #ifndef SimTK_SIMBODY_WRAPPING_PATH_SUBSYSTEM_H_
 #define SimTK_SIMBODY_WRAPPING_PATH_SUBSYSTEM_H_
 
+#include "SimTKcommon/internal/State.h"
 #include "SimTKmath.h"
 #include "simbody/internal/MobilizedBody.h"
 #include "simbody/internal/MultibodySystem.h"
@@ -191,15 +192,6 @@ public:
     WrapObstacleIndex adoptObstacle(WrapObstacle);
 
     Real getLength(const State& state) const;
-    Real getLengthDot(const State& state) const;
-    void applyBodyForces( const State& state, Real tension, Vector_<SpatialVec>& bodyForcesInG) const;
-    Real calcPower(const State& state, Real tension) const;
-
-    WrapObstacle& setDecorativeGeometry(const DecorativeGeometry& viz);
-    WrapObstacle& setNearPoint(const Vec3& point);
-    WrapObstacle& setContactPointHints(
-        const Vec3& startHint,
-        const Vec3& endHint);
 
     class Impl;
 
@@ -246,57 +238,45 @@ class WrappingPath::Impl {
             Real lDot = NaN;
         };
 
-        int getNumObstacles() const {return obstacles.size();}
-        const WrapObstacle& getObstacle(WrapObstacleIndex ix) const;
-        WrapObstacleIndex adoptObstacle(WrapObstacle& obstacle);
-
-        void calcPath(State& state, bool preventLiftOff = false) const;
-        void calcInitPath(State& state, std::function<Vec3(WrapObstacleIndex)> pointHints);
-
-        Real getPathError(const State& state) const;
-        Real getLength(const State& state) const;
-        Real getLengthDot(const State& state) const;
-        void applyBodyForces(const State& state, Real tension, Vector_<SpatialVec>& bodyForcesInG) const;
-        Real calcCablePower(const State& state, Real tension) const;
+        std::vector<WrapObstacle>& updObstacles() {return m_Obstacles;}
+        const std::vector<WrapObstacle>& getObstacles() const {return m_Obstacles;}
 
         // Allocate state variables and cache entries.
         void realizeTopology(State& state);
-        void realizeInstance(const State& state) const;
         void realizePosition(const State& state) const;
         void realizeVelocity(const State& state) const;
         void realizeAcceleration(const State& state) const;
-        /* void calcEventTriggerInfo (const State&, Array_<EventTriggerInfo>&) const; */
-        /* void handleEvents (State&, Event::Cause, const Array_<EventId>& eventIds, const HandleEventsOptions& options, HandleEventsResults& results) const; */
+        void invalidateTopology()
+        {   if (m_Subsystem) m_Subsystem->invalidateSubsystemTopologyCache(); }
 
         const PosInfo& getPosInfo(const State& state) const;
         const VelInfo& getVelInfo(const State& state) const;
         const VizInfo& getVizInfo(const State& state) const;
 
-        PosInfo& updPosEntry(const State& state) const;
-        VelInfo& updVelEntry(const State& state) const;
+    private:
+
+        PosInfo& updPosInfo(const State& state) const;
+        VelInfo& updVelInfo(const State& state) const;
         VizInfo& updVizInfo(const State& state) const;
 
         void calcPosInfo(PosInfo& posInfo) const;
         void calcVelInfo(const PosInfo& posInfo, VelInfo& velInfo) const;
         void calcVizInfo(const PosInfo& posInfo, VizInfo& vizInfo) const;
 
-        // Be sure to call this whenever you make a topology-level change to
-        // the cable definition, like adding an obstacle or modifying one in
-        // a significant way.
-        void invalidateTopology()
-        {   if (subsystem) subsystem->invalidateSubsystemTopologyCache(); }
+        void calcPath(State& state, bool preventLiftOff = false) const;
+        void calcInitPath(State& state, std::function<Vec3(WrapObstacleIndex)> pointHints);
 
-    private:
-        friend class WrappingPath;
-        std::shared_ptr<WrappingPathSubsystem> subsystem = nullptr;
-        WrappingPathIndex          index {};
+        std::shared_ptr<WrappingPathSubsystem> m_Subsystem = nullptr;
+        WrappingPathIndex          m_Index {};
 
-        std::vector<WrapObstacle> obstacles {};
+        std::vector<WrapObstacle> m_Obstacles {};
 
         // TOPOLOGY CACHE (set during realizeTopology())
-        DiscreteVariableIndex       posInfoIx;
-        DiscreteVariableIndex       velInfoIx;
-        DiscreteVariableIndex       vizInfoIx;
+        CacheEntryIndex       m_PosInfoIx;
+        CacheEntryIndex       m_VelInfoIx;
+        CacheEntryIndex       m_VizInfoIx;
+
+        friend class WrappingPath;
 };
 
 //==============================================================================
