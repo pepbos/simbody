@@ -162,7 +162,7 @@ struct PointOnLineResult
     size_t iter = 0;
 };
 
-PointOnLineResult calcNearestPointOnLine(Vec3 a, Vec3 b, Vec3 hint, size_t maxIter, double eps);
+PointOnLineResult calcNearestPointOnLine(Vec3 a, Vec3 b, Vec3 hint, size_t maxIter, double eps) const;
 
 // TODO
 class Cone;

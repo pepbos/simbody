@@ -44,7 +44,7 @@ public:
     Surface(const Surface&)                = delete;
     Surface& operator=(const Surface&)     = delete;
 
-    Surface(const ContactGeometry& geometry, Vec3 xHint);
+    Surface(WrappingPathSubsystem subsystem, const ContactGeometry& geometry, Vec3 xHint);
 
     // TODO move to impl to hide?
     struct LocalGeodesic
@@ -58,13 +58,22 @@ public:
         Variation dKQ {};
     };
 
+    // TODO move to impl to hide?
+    struct WrappingStatus
+    {
+        Vec3 pointOnLine {NaN, NaN, NaN};
+
+        bool liftoff = false;
+        bool disabled = false;
+    };
+
     const LocalGeodesic& calcGeodesic(State& s, Vec3 x, Vec3 t, Real l);
     const LocalGeodesic& applyGeodesicCorrection(const State& s, const Correction& c);
     const LocalGeodesic& getGeodesic(const State& s);
     Vec3 getPointOnLineNearSurface(const State& s);
 
-private:
     class Impl;
+private:
     explicit Surface(std::unique_ptr<Impl> impl);
     const Impl& getImpl() const;
     Impl& updImpl();
@@ -91,9 +100,10 @@ public:
     ~WrapObstacle()                                = default;
 
     WrapObstacle(const MobilizedBody& mobod, Transform X_BS, const ContactGeometry& geometry, Vec3 xHint);
+    bool isActive(const State& state) const;
 
-private:
     class Impl;
+private:
     explicit WrapObstacle(std::unique_ptr<Impl> impl);
 
     friend WrappingPath;
@@ -109,6 +119,13 @@ private:
 class SimTK_SIMBODY_EXPORT WrappingPath
 {
 public:
+        struct LineSegment
+        {
+            UnitVec3 d {NaN, NaN, NaN};
+            Real l = NaN;
+        };
+
+public:
     WrappingPath(
         WrappingPathSubsystem& subsystem,
         const MobilizedBody& originBody,
@@ -121,8 +138,8 @@ public:
 
     Real getLength(const State& state) const;
 
-private:
     class Impl;
+private:
     explicit WrappingPath(std::unique_ptr<Impl> impl);
 
     friend WrappingPathSubsystem;
