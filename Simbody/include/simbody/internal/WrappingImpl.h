@@ -83,12 +83,13 @@ public:
 
     // TODO rename
     bool isActive(const State& state) const;
+    bool isDisabled(const State& state) const;
 
     // 4. calcPathPoints
     size_t calcPathPoints(const State& state, std::vector<Vec3>& points) const;
 
     // Detect liftoff or touchdown, and compute the point on line near the surface.
-    const WrappingStatus& calcWrappingStatus(const State& state, Vec3 prev, Vec3 next, size_t maxIter, Real eps) const;
+    const WrappingStatus& calcUpdatedStatus(const State& state, Vec3 prev, Vec3 next) const;
 
     // TODO should be in OpenSim?
     void setInitialPointGuess(Vec3 pointGuess);
@@ -133,6 +134,9 @@ private:
     ContactGeometry m_Geometry;
 
     Vec3 m_InitPointGuess;
+
+    Real m_TouchdownAccuracy = 1e-3;
+    size_t m_TouchdownIter = 10;
 
     DiscreteVariableIndex m_GeodesicInfoIx;
 };
@@ -200,6 +204,11 @@ public:
     /* void realizeAcceleration(const State& state) const; */
     /* void invalidateTopology(); */
 
+    void invalidatePositionLevelCache(const State& state) const
+    {
+        m_Subsystem.markCacheValueNotRealized(state, m_PosInfoIx);
+    }
+
     const PosInfo& getPosInfo(const State& state) const;
 
     bool isActive(const State& state) const;
@@ -220,7 +229,9 @@ private:
     void calcPosInfo(const State& state, PosInfo& posInfo) const;
 
     // TODO Required for accessing the cache variable?
-    WrappingPathSubsystem m_Subsystem;
+    WrappingPathSubsystem m_Subsystem; // The subsystem this segment belongs to.
+    WrappingPath m_Path; // The path this segment belongs to.
+    PathSegmentIndex m_PathSegmentIx; // The index in its path.
 
     MobilizedBody m_Mobod;
     Transform m_Offset;
@@ -287,6 +298,14 @@ class WrappingPath::Impl {
     private:
         PosInfo& updPosInfo(const State& s) const;
         void calcPosInfo(const State& s, PosInfo& posInfo) const;
+
+        Vec3 findPrevPoint(
+                const State& state,
+                PathSegmentIndex idx) const;
+
+        Vec3 findNextPoint(
+                const State& state,
+                PathSegmentIndex idx) const;
 
         static Vec3 FindPrevPoint(
                 const State& state,
@@ -359,7 +378,7 @@ static double calcPathLength(
         CacheEntryIndex       m_VelInfoIx;
         CacheEntryIndex       m_VizInfoIx;
 
-        friend class WrappingPath;
+        friend WrapObstacle::Impl;
 };
 
 //==============================================================================

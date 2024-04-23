@@ -142,11 +142,13 @@ public:
 private:
     explicit WrappingPath(std::unique_ptr<Impl> impl);
 
-    friend WrappingPathSubsystem;
     const Impl& getImpl() const { return *impl; }
     Impl& updImpl() { return *impl; }
 
     std::shared_ptr<Impl> impl = nullptr;
+
+    friend WrapObstacle::Impl;
+    friend WrappingPathSubsystem;
 };
 
 //==============================================================================

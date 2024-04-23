@@ -258,6 +258,7 @@ void WrapObstacle::Impl::realizePosition(const State &state) const
 
 const WrapObstacle::Impl::PosInfo& WrapObstacle::Impl::getPosInfo(const State &state) const
 {
+    realizePosition(state);
     return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(state, m_PosInfoIx));
 }
 
@@ -274,10 +275,30 @@ void WrapObstacle::Impl::calcPosInfo(
 		const State& state,
 		PosInfo& posInfo) const
 {
-	// Transform the local geodesic to ground frame.
+    if(isDisabled(state))
+    {
+        return;
+    }
+
+	// Get tramsform from local surface frame to ground.
 	Transform X_GS = m_Mobod.getBodyTransform(state).compose(m_Offset);
+
+    // Get the path points before and after this segment.
+    Vec3 prev_G = m_Path.getImpl().findPrevPoint(state, m_PathSegmentIx);
+    Vec3 next_G = m_Path.getImpl().findNextPoint(state, m_PathSegmentIx);
+
+    // Transform the prev and next path points to the surface frame.
+    Vec3 prev_S = X_GS.shiftBaseStationToFrame(prev_G);
+    Vec3 next_S = X_GS.shiftBaseStationToFrame(next_G);
+
+    // Detect liftoff, touchdown and potential invalid configurations.
+    // TODO this doesnt follow the regular invalidation scheme...
+    m_Surface.getImpl().calcUpdatedStatus(state, prev_S, next_S);
+
+	// Grab the last geodesic that was computed.
 	const Surface::LocalGeodesic& geodesic_S = m_Surface.getImpl().getGeodesic(state);
 
+    // Store the the local geodesic in ground frame.
     posInfo.KP = X_GS.compose(geodesic_S.KP);
     posInfo.KQ = X_GS.compose(geodesic_S.KQ);
 
@@ -287,25 +308,18 @@ void WrapObstacle::Impl::calcPosInfo(
     posInfo.dKQ[0] = X_GS.R() * geodesic_S.dKQ[0];
     posInfo.dKQ[1] = X_GS.R() * geodesic_S.dKQ[1];
 
+    // TODO use SpatialVec for variation.
+    /* for (size_t i = 0; i < GeodesicDOF; ++i) { */
+    /*     posInfo.dKP[i][0] = X_GS.xformFrameVecToBase(geodesic_S.dKP[i][0]) */
+    /*     posInfo.dKP[i][1] = X_GS.xformFrameVecToBase(geodesic_S.dKP[i][1]) */
+
+    /*     posInfo.dKQ[i][0] = X_GS.xformFrameVecToBase(geodesic_S.dKQ[i][0]) */
+    /*     posInfo.dKQ[i][1] = X_GS.xformFrameVecToBase(geodesic_S.dKQ[i][1]) */
+    /* } */
+
     posInfo.length = geodesic_S.length;
 
     throw std::runtime_error("NOTYETIMPLEMENTED: Check transformation order");
-}
-
-void WrapObstacle::Impl::calcPosInfo(
-		const State& state,
-		Vec3 prev,
-		Vec3 next,
-		size_t maxIter, Real eps) const
-{
-    m_Surface.getImpl().calcWrappingStatus(state, prev, next, maxIter, eps);
-
-    if(isDisabled(state))
-    {
-        return;
-    }
-
-    calcPosInfo(state, updPosInfo(state));
 }
 
 void WrapObstacle::Impl::calcGeodesic(State& state, Vec3 x, Vec3 t, Real l) const
@@ -422,7 +436,7 @@ void WrappingPath::Impl::realizeTopology(State &state)
 void WrappingPath::Impl::realizePosition(const State &state) const
 {
 	if (m_Subsystem.isCacheValueRealized(state, m_PosInfoIx)) {return;}
-	calcPosInfo(updPosInfo(state));
+	calcPosInfo(state, updPosInfo(state));
 	m_Subsystem.markCacheValueRealized(state, m_PosInfoIx);
 }
 
@@ -601,36 +615,15 @@ Vec3 WrappingPath::Impl::FindNextPoint(
     return next ? next->getImpl().getPosInfo(state).KP.p() : terminationPoint;
 }
 
-size_t WrappingPath::Impl::CalcUpdatedObstaclePosInfo(
-        const State& s,
-        const Vec3& x_O,
-        const Vec3& x_I,
-        const std::vector<WrapObstacle>& obs, size_t maxIter, Real eps)
-{
-    size_t countActive = 0;
-    for (size_t i = 0; i < obs.size(); ++i) {
-        if (!obs.at(i).isActive(s)) {
-            continue;
-        }
-
-        Vec3 prev = FindPrevPoint(s, x_O, obs, i);
-        Vec3 next = FindPrevPoint(s, x_I, obs, i);
-        obs.at(i).getImpl().calcPosInfo(s, prev, next, maxIter, eps);
-    }
-}
-
 void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 {
-	// Path oigin and termination points.
+	// Path origin and termination point.
 	const Vec3 x_O = m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
 	const Vec3 x_I = m_TerminationBody.getBodyTransform(s).shiftFrameStationToBase(m_TerminationPoint);
 
 	const std::array<CoordinateAxis, 2> axes {NormalAxis, BinormalAxis};
 
     for (posInfo.loopIter = 0; posInfo.loopIter < m_PathMaxIter; ++posInfo.loopIter) {
-        // Things have changed: recompute the position level cache of the obstacles.
-        CalcUpdatedObstaclePosInfo(s, x_O, x_I, m_Obstacles, m_ObsMaxIter, m_ObsErrorBound);
-
         // Compute the straight-line segments.
         calcLineSegments(s, x_O, x_I, m_Obstacles, posInfo.lines);
 
@@ -656,6 +649,11 @@ void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
             }
             obstacle.getImpl().applyGeodesicCorrection(s, *corrIt);
             ++corrIt;
+        }
+
+        // Path has changed: invalidate each segment's cache.
+        for (const WrapObstacle& obstacle : m_Obstacles) {
+            obstacle.getImpl().invalidatePositionLevelCache(s);
         }
     }
 
