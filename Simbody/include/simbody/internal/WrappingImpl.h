@@ -36,22 +36,13 @@ class WrapObstacle::Impl
     Impl& operator=(const Impl& source) = default;
     ~Impl()                                     = default;
 
-    /* Surface(const MobilizedBody& mobod, const Transform& X_BS, const ContactGeometry& geometry) */
-    /*     : impl(std::make_shared<SurfaceImpl>(mobod, X_BS, geometry)) {} */
-    /* Transform calcSurfaceToGroundTransform(const State& state) const {return impl->calcSurfaceToGroundTransform(state);} */
-
     Impl(
-            WrappingPathSubsystem subsystem,
+            WrappingPath path,
             const MobilizedBody& mobod,
             const Transform& X_BS,
             ContactGeometry geometry,
             Vec3 initPointGuess
-        ) : 
-        m_Subsystem(subsystem),
-        m_Mobod(mobod),
-        m_Offset(X_BS),
-        m_Surface(subsystem, geometry, initPointGuess)
-    {}
+        );
 
     enum class Status
     {
@@ -60,52 +51,6 @@ class WrapObstacle::Impl
         Disabled,
     };
 
-    // Ground frame solution.
-    struct PosInfo
-    {
-        FrenetFrame KP {};
-        FrenetFrame KQ {};
-
-        Variation dKP {};
-        Variation dKQ {};
-
-        Real length = NaN;
-
-        Status status = Status::Ok;
-    };
-
-    // Allocate state variables and cache entries.
-    void realizeTopology(State& state);
-    /* void realizeInstance(const State& state) const; */
-    void realizePosition(const State& state) const;
-    /* void realizeVelocity(const State& state) const; */
-    /* void realizeAcceleration(const State& state) const; */
-    /* void invalidateTopology(); */
-
-    void invalidatePositionLevelCache(const State& state) const
-    {
-        m_Subsystem.markCacheValueNotRealized(state, m_PosInfoIx);
-    }
-
-    const PosInfo& getPosInfo(const State& state) const;
-
-    bool isActive(const State& state) const;
-    bool isDisabled(const State& state) const;
-
-    PosInfo& updPosInfo(const State &state) const
-    {
-        return Value<PosInfo>::updDowncast(m_Subsystem.updCacheEntry(state, m_PosInfoIx));
-    }
-
-    size_t calcPathPoints(const State& state, std::vector<Vec3>& points) const;
-    void applyGeodesicCorrection(const State& state, const ContactGeometry::GeodesicCorrection& c) const;
-    void calcInitZeroLengthGeodesic(State& state, Vec3 prev_QS);
-
-    private:
-    void calcPosInfo(const State& state, PosInfo& posInfo) const;
-    void calcGeodesic(State& state, Vec3 x, Vec3 t, Real l) const;
-
-    public: // TODO public?
     //==============================================================================
     //                      SURFACE
     //==============================================================================
@@ -181,6 +126,8 @@ class WrapObstacle::Impl
         void setInitialPointGuess(Vec3 initPointGuess) {m_InitPointGuess = initPointGuess;}
         Vec3 getInitialPointGuess() const {return m_InitPointGuess;}
 
+        Status getStatus(const State& s) const {return getCacheEntry(s).status;}
+
         private:
 
         struct CacheEntry : LocalGeodesicInfo
@@ -234,7 +181,56 @@ class WrapObstacle::Impl
         DiscreteVariableIndex m_CacheIx;
     };
 
+    // Ground frame solution.
+    struct PosInfo
+    {
+        Transform X_GS {};
+
+        FrenetFrame KP {};
+        FrenetFrame KQ {};
+
+        Variation dKP {};
+        Variation dKQ {};
+
+        Real length = NaN;
+
+        Status status = Status::Ok;
+    };
+
+    // Allocate state variables and cache entries.
+    void realizeTopology(State& state);
+    /* void realizeInstance(const State& state) const; */
+    void realizePosition(const State& state) const;
+    /* void realizeVelocity(const State& state) const; */
+    /* void realizeAcceleration(const State& state) const; */
+    /* void invalidateTopology(); */
+
+    void invalidatePositionLevelCache(const State& state) const
+    {
+        m_Subsystem.markCacheValueNotRealized(state, m_PosInfoIx);
+    }
+
+    const PosInfo& getPosInfo(const State& s) const {
+        realizePosition(s);
+        return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(s, m_PosInfoIx));
+    }
+
+    bool isActive(const State& s) const {return getPosInfo(s).status == Status::Ok;}
+    Status getStatus(const State& s) const {return m_Surface.getStatus(s);}
+
+    void calcInitZeroLengthGeodesic(State& state, Vec3 prev_QS) const;
+    void applyGeodesicCorrection(const State& state, const ContactGeometry::GeodesicCorrection& c) const;
+    size_t calcPathPoints(const State& state, std::vector<Vec3>& points) const;
+
+    // TODO allow for user to shoot his own geodesic.
+    /* void calcGeodesic(State& state, Vec3 x, Vec3 t, Real l) const; */
+
     private:
+    PosInfo& updPosInfo(const State &state) const
+    {
+        return Value<PosInfo>::updDowncast(m_Subsystem.updCacheEntry(state, m_PosInfoIx));
+    }
+    void calcPosInfo(const State& state, PosInfo& posInfo) const;
 
     // TODO Required for accessing the cache variable?
     WrappingPathSubsystem m_Subsystem; // The subsystem this segment belongs to.
@@ -249,7 +245,6 @@ class WrapObstacle::Impl
     // TOPOLOGY CACHE
     CacheEntryIndex       m_PosInfoIx;
 };
-
 
 //==============================================================================
 //                         PATH :: IMPL
@@ -367,6 +362,8 @@ static double calcPathLength(
 	const State& state,
     const std::vector<WrapObstacle>& obs,
     const std::vector<LineSegment>& lines);
+
+const WrappingPathSubsystem& getSubsystem() const {return m_Subsystem;}
 
         WrappingPathSubsystem m_Subsystem;
 

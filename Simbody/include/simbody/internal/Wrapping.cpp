@@ -228,6 +228,23 @@ void Surface::applyGeodesicCorrection(const State& s, const Correction& c) const
 	calcGeodesic(g0, updCacheEntry(s));
 }
 
+size_t Surface::calcPathPoints(const State& s, std::vector<Vec3>& points) const
+{
+    realizePosition(s);
+
+    size_t count = 0;
+    const CacheEntry& cache = getCacheEntry(s);
+    for (Vec3 p: cache.points) {
+        points.push_back(p);
+        ++count;
+    }
+	throw std::runtime_error("NOTYETIMPLEMENTED for analytic");
+    return count;
+}
+
+//------------------------------------------------------------------------------
+//                               PRIVATE METHODS
+//------------------------------------------------------------------------------
 void Surface::calcGeodesic(const GeodesicInitialConditions& g0, CacheEntry& cache) const
 {
 	// Compute geodesic start boundary frame and variation.
@@ -287,31 +304,25 @@ void Surface::calcStatus(const Vec3& prev_QS, const Vec3& next_PS, CacheEntry& c
     }
 }
 
-size_t Surface::calcPathPoints(const State& s, std::vector<Vec3>& points) const
-{
-    realizePosition(s);
-
-    size_t count = 0;
-    const CacheEntry& cache = getCacheEntry(s);
-    for (Vec3 p: cache.points) {
-        points.push_back(p);
-        ++count;
-    }
-	throw std::runtime_error("NOTYETIMPLEMENTED for analytic");
-    return count;
-}
-
-//------------------------------------------------------------------------------
-//                               PRIVATE METHODS
-//------------------------------------------------------------------------------
-
 //==============================================================================
 //                               OBSTACLE
 //==============================================================================
 
-bool WrapObstacle::Impl::isActive(const State& s) const
+WrapObstacle::Impl::Impl(
+            WrappingPath path,
+            const MobilizedBody& mobod,
+            const Transform& X_BS,
+            ContactGeometry geometry,
+            Vec3 initPointGuess
+        )
+    :
+        m_Subsystem(path.getImpl().getSubsystem()),
+        m_Path(path),
+        m_Mobod(mobod),
+        m_Offset(X_BS),
+        m_Surface(m_Subsystem, geometry, initPointGuess)
 {
-    return getPosInfo(s).status == Status::Ok;
+    throw std::runtime_error("NOTYETIMPLEMENTED: Must adopt to path, and give the index");
 }
 
 void WrapObstacle::Impl::realizeTopology(State &s)
@@ -329,47 +340,63 @@ void WrapObstacle::Impl::realizePosition(const State &s) const
 	}
 }
 
-const WrapObstacle::Impl::PosInfo& WrapObstacle::Impl::getPosInfo(const State &s) const
+void WrapObstacle::Impl::calcInitZeroLengthGeodesic(State& s, Vec3 prev_QG) const
 {
-    realizePosition(s);
-    return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(s, m_PosInfoIx));
+	// Get tramsform from local surface frame to ground.
+	Transform X_GS = m_Mobod.getBodyTransform(s).compose(m_Offset);
+
+	Vec3 prev_QS = X_GS.shiftBaseStationToFrame(prev_QG);
+	Vec3 xGuess_S = m_Surface.getInitialPointGuess(); // TODO move into function call?
+
+    GeodesicInitialConditions g0 = GeodesicInitialConditions::CreateZeroLengthGuess(X_GS, prev_QS, xGuess_S);
+    m_Surface.calcInitialGeodesic(s, g0);
+
+	m_Subsystem.markCacheValueNotRealized(s, m_PosInfoIx);
 }
 
 void WrapObstacle::Impl::applyGeodesicCorrection(const State& s, const WrapObstacle::Impl::Correction& c) const
 {
     // Apply correction to curve.
-    m_Surface.getImpl().applyGeodesicCorrection(s, c);
+    m_Surface.applyGeodesicCorrection(s, c);
 
 	// Invalidate position level cache.
 	m_Subsystem.markCacheValueNotRealized(s, m_PosInfoIx);
+}
+
+size_t WrapObstacle::Impl::calcPathPoints(const State& s, std::vector<Vec3>& points) const
+{
+    const Transform& X_GS = getPosInfo(s).X_GS;
+    size_t n = m_Surface.calcPathPoints(s, points);
+    for (size_t i = points.size() - n; i < points.size(); ++i) {
+        points.at(i) = X_GS.shiftFrameStationToBase(points.at(i));
+    }
+    return n;
 }
 
 void WrapObstacle::Impl::calcPosInfo(
 		const State& s,
 		PosInfo& posInfo) const
 {
-    if(isDisabled(s))
+    if(m_Surface.getStatus(s) == Status::Disabled)
     {
         return;
     }
 
-	// Get tramsform from local surface frame to ground.
-	Transform X_GS = m_Mobod.getBodyTransform(s).compose(m_Offset);
+	// Compute tramsform from local surface frame to ground.
+	const Transform& X_GS = posInfo.X_GS = m_Mobod.getBodyTransform(s).compose(m_Offset);
 
     // Get the path points before and after this segment.
-    Vec3 prev_G = m_Path.getImpl().findPrevPoint(s, m_PathSegmentIx);
-    Vec3 next_G = m_Path.getImpl().findNextPoint(s, m_PathSegmentIx);
+    const Vec3 prev_G = m_Path.getImpl().findPrevPoint(s, m_PathSegmentIx);
+    const Vec3 next_G = m_Path.getImpl().findNextPoint(s, m_PathSegmentIx);
 
     // Transform the prev and next path points to the surface frame.
-    Vec3 prev_S = X_GS.shiftBaseStationToFrame(prev_G);
-    Vec3 next_S = X_GS.shiftBaseStationToFrame(next_G);
+    const Vec3 prev_S = X_GS.shiftBaseStationToFrame(prev_G);
+    const Vec3 next_S = X_GS.shiftBaseStationToFrame(next_G);
 
     // Detect liftoff, touchdown and potential invalid configurations.
     // TODO this doesnt follow the regular invalidation scheme...
-    m_Surface.getImpl().calcUpdatedStatus(s, prev_S, next_S);
-
 	// Grab the last geodesic that was computed.
-	const Surface::LocalGeodesic& geodesic_S = m_Surface.getImpl().getGeodesic(s);
+	const LocalGeodesicInfo& geodesic_S = m_Surface.calcLocalGeodesic(s, prev_S, next_S);
 
     // Store the the local geodesic in ground frame.
     posInfo.KP = X_GS.compose(geodesic_S.KP);
@@ -393,12 +420,6 @@ void WrapObstacle::Impl::calcPosInfo(
     posInfo.length = geodesic_S.length;
 
     throw std::runtime_error("NOTYETIMPLEMENTED: Check transformation order");
-}
-
-void WrapObstacle::Impl::calcGeodesic(State& s, Vec3 x, Vec3 t, Real l) const
-{
-    m_Surface.getImpl().calcGeodesic(s, x, t, l);
-	m_Subsystem.markCacheValueNotRealized(s, m_PosInfoIx);
 }
 
 //==============================================================================
