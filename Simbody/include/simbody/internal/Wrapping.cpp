@@ -10,6 +10,8 @@
 using namespace SimTK;
 
 using GeodesicInfo = WrapObstacle::Impl::PosInfo;
+using LineSegment = WrappingPath::LineSegment;
+using Correction = ContactGeometry::GeodesicCorrection;
 
 //==============================================================================
 //                                CONSTANTS
@@ -26,36 +28,58 @@ namespace {
 //==============================================================================
 
 namespace {
-    struct SolverData;
+    class SolverDataCache;
+    SolverDataCache& findDataCache(size_t nActive);
 
     struct SolverData 
     {
-        // A * x = b
-        Matrix A;
-        Vector x;
-        Vector b;
+        std::vector<LineSegment> lineSegments;
+
+        Matrix pathErrorJacobian;
+        Vector pathCorrection;
+        Vector pathError;
+        Matrix mat;
+        // TODO Cholesky decomposition...
+        FactorLU matInv;
+        Vector vec;
     };
 
     class SolverDataCache
     {
+        private:
+        SolverDataCache(size_t n) {
+            static constexpr int Q = 4;
+            static constexpr int C = 4;
+
+            m_Data.lineSegments.resize(n+1);
+            m_Data.pathErrorJacobian = Matrix(C * n, Q * n, 0.);
+            m_Data.pathCorrection    = Vector(Q * n, 0.);
+            m_Data.pathError         = Vector(C * n, 0.);
+            m_Data.mat               = Matrix(Q*n, Q*n, NaN);
+            m_Data.vec               = Vector(Q*n, NaN);
+        }
+
         public:
-        SolverDataCache(std::mutex& cacheMutex) :
-            m_guard(cacheMutex) {}
+        void lock() {
+            m_Mutex.lock();
+        }
 
-        void setDataPtr(SolverData* ptr) {m_data = ptr;}
+        void unlock() {
+            m_Mutex.unlock();
+        }
 
-        SolverData& updData() {return *m_data;}
+        SolverData& updData() {return m_Data;}
 
         private:
-        std::lock_guard<std::mutex> m_guard;
-        SolverData* m_data = nullptr;
+        SolverData m_Data;
+        std::mutex m_Mutex {};
+
+        friend SolverDataCache& findDataCache(size_t nActive);
     };
 
-    SolverDataCache&& findDataCache(size_t nActive)
+    SolverDataCache& findDataCache(size_t nActive)
     {
-        static constexpr int Q = 4;
-        static constexpr int C = 4;
-        static std::vector<SolverData> s_GlobalCache {};
+        static std::vector<SolverDataCache> s_GlobalCache {};
         static std::mutex s_GlobalLock {};
 
         {
@@ -63,14 +87,30 @@ namespace {
 
             for (size_t i = s_GlobalCache.size(); i < nActive - 1; ++i) {
                 int n = i + 1;
-                s_GlobalCache.emplace_back(
-                        Matrix{C * n, Q * n, 0.},
-                        Vector{Q * n, 0.},
-                        Vector{C * n, 0.});
+                s_GlobalCache.emplace_back(nActive);
             }
         }
 
-        return SolverDataCache(s_GlobalLock);
+        return s_GlobalCache.at(nActive-1);
+    }
+
+    const Correction* calcPathCorrections(SolverData& data) {
+        Real w = data.pathError.normInf();
+
+        data.mat = data.pathErrorJacobian.transpose() * data.pathErrorJacobian;
+        for (int i = 0; i < data.mat.nrow(); ++i) {
+            data.mat[i][i] += w;
+        }
+        data.matInv = data.mat;
+        data.vec = data.pathErrorJacobian.transpose() * data.pathError;
+        data.matInv.solve(data.vec, data.pathCorrection);
+
+        static_assert(
+                sizeof(Correction) == sizeof(double) * GeodesicDOF,
+                "Invalid size of corrections vector");
+        SimTK_ASSERT(data.pathCorrection.size() * sizeof(double) == n * sizeof(Correction),
+                "Invalid size of path corrections vector");
+        return reinterpret_cast<const Correction*>(&data.pathCorrection[0]);
     }
 } // namespace
 
@@ -81,7 +121,6 @@ namespace {
 namespace {
     using FrenetFrame = ContactGeometry::FrenetFrame;
     using Variation = ContactGeometry::GeodesicVariation;
-    using Correction = ContactGeometry::GeodesicCorrection;
     using GeodesicInitialConditions = Surface::Impl::GeodesicInitialConditions;
 
     GeodesicInitialConditions calcCorrectedGeodesicInitConditions(const FrenetFrame& KP, const Variation& dKP, Real l, const Correction& c)
@@ -155,10 +194,10 @@ void Surface::Impl::applyGeodesicCorrection(const State& state, const Correction
 	calcLocalGeodesicInfo(g0.x, g0.t, g0.l, g.sHint, updLocalGeodesicInfo(state));
 }
 
-const Surface::WrappingStatus& Surface::Impl::calcWrappingStatus(
+const Surface::WrappingStatus& Surface::Impl::calcUpdatedStatus(
         const State& state,
         Vec3 prevPoint,
-        Vec3 nextPoint, size_t maxIter, Real eps) const
+        Vec3 nextPoint) const
 {
     LocalGeodesicInfo& g = updLocalGeodesicInfo(state);
 
@@ -175,7 +214,7 @@ const Surface::WrappingStatus& Surface::Impl::calcWrappingStatus(
     }
 
     // Update the tracking point.
-    ContactGeometry::PointOnLineResult result = m_Geometry.calcNearestPointOnLine(prevPoint, nextPoint, g.pointOnLine, maxIter, eps);
+    ContactGeometry::PointOnLineResult result = m_Geometry.calcNearestPointOnLine(prevPoint, nextPoint, g.pointOnLine, m_TouchdownIter, m_TouchdownAccuracy);
     g.pointOnLine = result.p; // TODO rename to point.
 
     // Attempt touchdown.
@@ -335,7 +374,6 @@ void WrapObstacle::Impl::calcGeodesic(State& state, Vec3 x, Vec3 t, Real l) cons
 namespace
 {
     using GeodesicJacobian = Vec4;
-    using LineSegment = WrappingPath::LineSegment;
     using PointVariation = ContactGeometry::GeodesicPointVariation;
     using FrameVariation = ContactGeometry::GeodesicFrameVariation;
     using Variation = ContactGeometry::GeodesicVariation;
@@ -624,11 +662,17 @@ void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 	const std::array<CoordinateAxis, 2> axes {NormalAxis, BinormalAxis};
 
     for (posInfo.loopIter = 0; posInfo.loopIter < m_PathMaxIter; ++posInfo.loopIter) {
+        const size_t nActive = countActive(s);
+
+        // Grab the shared data cache for computing the matrices, and lock it.
+        SolverDataCache& data = findDataCache(nActive);
+        data.lock();
+
         // Compute the straight-line segments.
-        calcLineSegments(s, x_O, x_I, m_Obstacles, posInfo.lines);
+        calcLineSegments(s, x_O, x_I, m_Obstacles, data.updData().lineSegments);
 
         // Evaluate path error, and stop when converged.
-        calcPathErrorVector<2>(s, m_Obstacles, posInfo.lines, axes, posInfo.pathError);
+        calcPathErrorVector<2>(s, m_Obstacles, posInfo.lines, axes, data.updData().pathError);
         const Real maxPathError = posInfo.pathError.normInf();
         if (maxPathError < m_PathErrorBound) {
             return;
@@ -638,11 +682,9 @@ void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         calcPathErrorJacobian<2>(s, m_Obstacles, posInfo.lines, axes, posInfo.pathErrorJacobian);
 
         // Compute path corrections.
-        calcPathCorrections(s, m_Obstacles, posInfo.pathError, posInfo.pathErrorJacobian, posInfo.pathMatrix, posInfo.pathCorrections);
+		const Correction* corrIt = calcPathCorrections(data.updData());
 
         // Apply path corrections.
-		throw std::runtime_error("NOTYETIMPLEMENTED");
-		const Correction* corrIt = nullptr; // TODO
         for (const WrapObstacle& obstacle : m_Obstacles) {
             if (!obstacle.isActive(s)) {
                 continue;
@@ -651,6 +693,9 @@ void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
             ++corrIt;
         }
 
+        // Release the lock on the shared data.
+        data.unlock();
+
         // Path has changed: invalidate each segment's cache.
         for (const WrapObstacle& obstacle : m_Obstacles) {
             obstacle.getImpl().invalidatePositionLevelCache(s);
@@ -658,17 +703,6 @@ void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
     }
 
 	throw std::runtime_error("Failed to converge");
-}
-
-//==============================================================================
-//                                WRAP OBSTACLE IMPL
-//==============================================================================
-
-namespace
-{
-
-void calcPathCorrections(const State& s, const std::vector<WrapObstacle>& obs, const Vector& pathError, const Matrix& pathErrorJacobian, Matrix& pathMatrix, Vector& pathCorrections);
-
 }
 
 //==============================================================================

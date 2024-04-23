@@ -16,6 +16,9 @@
 namespace SimTK
 {
 
+SimTK_DEFINE_UNIQUE_INDEX_TYPE(PathSegmentIndex);
+SimTK_DEFINE_UNIQUE_INDEX_TYPE(PathIndex);
+
 //==============================================================================
 //                      SURFACE IMPL
 //==============================================================================
