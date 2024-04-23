@@ -36,9 +36,10 @@ namespace {
         Vector b;
     };
 
-    struct SolverDataCache
+    class SolverDataCache
     {
-        SolverDataCache(std::mutex&& cacheMutex) :
+        public:
+        SolverDataCache(std::mutex& cacheMutex) :
             m_guard(cacheMutex) {}
 
         void setDataPtr(SolverData* ptr) {m_data = ptr;}
@@ -50,24 +51,26 @@ namespace {
         SolverData* m_data = nullptr;
     };
 
-    SolverDataCache&& updSolverDataCache(size_t nActive)
+    SolverDataCache&& findDataCache(size_t nActive)
     {
         static constexpr int Q = 4;
         static constexpr int C = 4;
         static std::vector<SolverData> s_GlobalCache {};
         static std::mutex s_GlobalLock {};
 
-        SolverDataCache data(std::move(s_GlobalLock));
+        {
+            std::lock_guard<std::mutex> lock(s_GlobalLock);
 
-        for (size_t i = s_GlobalCache.size(); i < nActive - 1; ++i) {
-            int n = i + 1;
-            s_GlobalCache.emplace_back(
-                    Matrix{C * n, Q * n, 0.},
-                    Vector{Q * n, 0.},
-                    Vector{C * n, 0.});
+            for (size_t i = s_GlobalCache.size(); i < nActive - 1; ++i) {
+                int n = i + 1;
+                s_GlobalCache.emplace_back(
+                        Matrix{C * n, Q * n, 0.},
+                        Vector{Q * n, 0.},
+                        Vector{C * n, 0.});
+            }
         }
 
-        return std::move(data);
+        return SolverDataCache(s_GlobalLock);
     }
 } // namespace
 
