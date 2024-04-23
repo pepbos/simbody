@@ -155,14 +155,7 @@ void calcGeodesicEndFrameVariationAnalytically(        Vec3 x,
 void calcGeodesicPointsAnalytically(Vec3 x, UnitVec3 t, Real l, std::vector<Vec3>& points);
 bool analyticFormAvailable() const;
 
-struct PointOnLineResult
-{
-    Vec3 p {NaN, NaN, NaN};
-    bool isInsideSurface = false;
-    size_t iter = 0;
-};
-
-PointOnLineResult calcNearestPointOnLine(Vec3 a, Vec3 b, Vec3 hint, size_t maxIter, double eps) const;
+bool calcNearestPointOnLine(Vec3 a, Vec3 b, Vec3& point, size_t maxIter, double eps) const;
 
 // TODO
 class Cone;

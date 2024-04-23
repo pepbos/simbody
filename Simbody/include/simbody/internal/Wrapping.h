@@ -24,67 +24,6 @@ class WrapObstacle;
 class WrappingPath;
 
 //==============================================================================
-//                      SURFACE
-//==============================================================================
-// Represents the local surface wrapping problem.
-// Caches last computed geodesic as a warmstart.
-// Not exposed outside of simbody.
-// Not shared amongst different paths or obstacles.
-class SimTK_SIMBODY_EXPORT Surface
-{
-    using FrenetFrame = ContactGeometry::FrenetFrame;
-    using Variation = ContactGeometry::GeodesicVariation;
-    using Correction = ContactGeometry::GeodesicCorrection;
-
-public:
-    Surface()                              = default;
-    ~Surface() = default;
-    Surface(Surface&&) noexcept            = default;
-    Surface& operator=(Surface&&) noexcept = default;
-    Surface(const Surface&)                = delete;
-    Surface& operator=(const Surface&)     = delete;
-
-    Surface(WrappingPathSubsystem subsystem, const ContactGeometry& geometry, Vec3 xHint);
-
-    // TODO move to impl to hide?
-    struct LocalGeodesic
-    {
-        FrenetFrame KP {};
-        FrenetFrame KQ {};
-
-        Real length = NaN;
-
-        Variation dKP {};
-        Variation dKQ {};
-    };
-
-    // TODO move to impl to hide?
-    struct WrappingStatus
-    {
-        Vec3 pointOnLine {NaN, NaN, NaN};
-
-        bool liftoff = false;
-        bool disabled = false;
-    };
-
-    const LocalGeodesic& calcGeodesic(State& s, Vec3 x, Vec3 t, Real l);
-    const LocalGeodesic& applyGeodesicCorrection(const State& s, const Correction& c);
-    const LocalGeodesic& getGeodesic(const State& s);
-    Vec3 getPointOnLineNearSurface(const State& s);
-
-    class Impl;
-private:
-    explicit Surface(std::unique_ptr<Impl> impl);
-    const Impl& getImpl() const;
-    Impl& updImpl();
-
-    friend Impl;
-    friend WrapObstacle;
-
-    std::unique_ptr<Impl> impl = nullptr;
-};
-
-//==============================================================================
 //                                OBSTACLE
 //==============================================================================
 // Although cheap to copy, we cannot hand them out because they have a cache entry associated with them.
@@ -103,6 +42,14 @@ public:
     bool isActive(const State& state) const;
 
     class Impl;
+
+    enum class Status
+    {
+        Ok,
+        Liftoff,
+        Disabled,
+    };
+
 private:
     explicit WrapObstacle(std::unique_ptr<Impl> impl);
 

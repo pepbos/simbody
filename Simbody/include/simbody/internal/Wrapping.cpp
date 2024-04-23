@@ -9,9 +9,12 @@
 
 using namespace SimTK;
 
-using GeodesicInfo = WrapObstacle::Impl::PosInfo;
-using LineSegment = WrappingPath::LineSegment;
 using Correction = ContactGeometry::GeodesicCorrection;
+using FrenetFrame = ContactGeometry::FrenetFrame;
+using GeodesicInitialConditions = WrapObstacle::Impl::Surface::GeodesicInitialConditions;
+using LocalGeodesicInfo = WrapObstacle::Impl::Surface::LocalGeodesicInfo;
+using GeodesicInfo = WrapObstacle::Impl::GeodesicInfo;
+using Variation = ContactGeometry::GeodesicVariation;
 
 //==============================================================================
 //                                CONSTANTS
@@ -115,216 +118,247 @@ namespace {
 } // namespace
 
 //==============================================================================
-//                                SOME MATH
+//                          GEODESIC INITIAL CONDITIONS
 //==============================================================================
 
-namespace {
-    using FrenetFrame = ContactGeometry::FrenetFrame;
-    using Variation = ContactGeometry::GeodesicVariation;
-    using GeodesicInitialConditions = Surface::Impl::GeodesicInitialConditions;
+GeodesicInitialConditions GeodesicInitialConditions::CreateCorrected(const FrenetFrame& KP, const Variation& dKP, Real l, const Correction& c)
+{
+    GeodesicInitialConditions g0;
 
-    GeodesicInitialConditions calcCorrectedGeodesicInitConditions(const FrenetFrame& KP, const Variation& dKP, Real l, const Correction& c)
-    {
-        Surface::Impl::GeodesicInitialConditions g0;
+    Vec3 v = dKP[1] * c;
+    g0.x = KP.p() + v;
 
-        Vec3 v = dKP[1] * c;
-        g0.x = KP.p() + v;
+    Vec3 w = dKP[0] * c;
+    const UnitVec3 t = KP.R().getAxisUnitVec(ContactGeometry::TangentAxis);
+    g0.t = t + cross(w,t);
 
-        Vec3 w = dKP[0] * c;
-        const UnitVec3 t = KP.R().getAxisUnitVec(ContactGeometry::TangentAxis);
-        g0.t = t + cross(w,t);
+    Real dl = c[3];
+    g0.l = l + dl;
 
-        Real dl = c[3];
-        g0.l = l + dl;
+    return g0;
+}
 
-        return g0;
-    }
+GeodesicInitialConditions GeodesicInitialConditions::CreateInSurfaceFrame(const Transform& X_GS, Vec3 x_G, Vec3 t_G, Real l)
+{
+    GeodesicInitialConditions g0;
+
+    g0.x = X_GS.shiftBaseStationToFrame(x_G);
+    g0.t = X_GS.xformBaseVecToFrame(t_G);
+    g0.l = l;
+
+    return g0;
+}
+
+GeodesicInitialConditions GeodesicInitialConditions::CreateZeroLengthGuess(const Transform& X_GS, Vec3 prev_QS, Vec3 xGuess_S)
+{
+    GeodesicInitialConditions g0;
+
+    g0.x = xGuess_S;
+    g0.t = g0.x - X_GS.shiftBaseStationToFrame(prev_QS);
+    g0.l = 0.;
+
+    return g0;
+}
+
+GeodesicInitialConditions GeodesicInitialConditions::CreateAtTouchdown(Vec3 prev_QS, Vec3 next_PS, Vec3 trackingPointOnLine)
+{
+    GeodesicInitialConditions g0;
+
+    g0.x = trackingPointOnLine;
+    g0.t = next_PS - prev_QS;
+    g0.l = 0.;
+
+    return g0;
 }
 
 //==============================================================================
 //                                SURFACE IMPL
 //==============================================================================
+using Surface = WrapObstacle::Impl::Surface;
 
 //------------------------------------------------------------------------------
 //                               REALIZE CACHE
 //------------------------------------------------------------------------------
-void Surface::Impl::realizeTopology(State &state)
+void Surface::realizeTopology(State &s)
 {
 	// Allocate an auto-update discrete variable for the last computed geodesic.
-	LocalGeodesicInfo geodesic {};
-	m_GeodesicInfoIx = m_Subsystem.allocateAutoUpdateDiscreteVariable(state, Stage::Velocity, new Value<LocalGeodesicInfo>(geodesic), Stage::Position);
+	CacheEntry cache {};
+	m_CacheIx = m_Subsystem.allocateAutoUpdateDiscreteVariable(s, Stage::Velocity, new Value<CacheEntry>(cache), Stage::Position);
 }
 
-void Surface::Impl::realizeInstance(const State &state) const
+void Surface::realizePosition(const State &s) const
 {
-	throw std::runtime_error("NOTYETIMPLEMENTED");
-}
-
-void Surface::Impl::realizePosition(const State &state) const
-{
-	// Set the current local geodesic equal to the previous.
-	if (!m_Subsystem.isDiscreteVarUpdateValueRealized(state, m_GeodesicInfoIx)) {
-		updLocalGeodesicInfo(state) = getPrevLocalGeodesicInfo(state);
-		m_Subsystem.markDiscreteVarUpdateValueRealized(state, m_GeodesicInfoIx);
+	if (!m_Subsystem.isDiscreteVarUpdateValueRealized(s, m_CacheIx)) {
+		updCacheEntry(s) = getPrevCacheEntry(s);
+		m_Subsystem.markDiscreteVarUpdateValueRealized(s, m_CacheIx);
 	}
-}
-
-void Surface::Impl::realizeVelocity(const State &state) const
-{
-	throw std::runtime_error("NOTYETIMPLEMENTED");
-}
-
-void Surface::Impl::realizeAcceleration(const State &state) const
-{
-	throw std::runtime_error("NOTYETIMPLEMENTED");
 }
 
 //------------------------------------------------------------------------------
 //                               PUBLIC METHODS
 //------------------------------------------------------------------------------
-void Surface::Impl::applyGeodesicCorrection(const State& state, const Correction& c) const
+const LocalGeodesicInfo& Surface::calcInitialGeodesic(State& s, const GeodesicInitialConditions& g0) const
 {
+    // TODO is this correct?
+    CacheEntry& cache = updPrevCacheEntry(s);
+    calcGeodesic(g0, cache);
+    updCacheEntry(s) = cache;
+    m_Subsystem.markDiscreteVarUpdateValueRealized(s, m_CacheIx);
+}
+
+const LocalGeodesicInfo& Surface::calcLocalGeodesic(const State& s, Vec3 prev_QS, Vec3 next_PS) const
+{
+    realizePosition(s);
+    CacheEntry& cache = updCacheEntry(s);
+    calcStatus(prev_QS, next_PS, cache);
+    return cache;
+}
+
+void Surface::applyGeodesicCorrection(const State& s, const Correction& c) const
+{
+    realizePosition(s);
+
 	// Get the previous geodesic.
-	const LocalGeodesicInfo& g = getLocalGeodesicInfo(state);
+	const CacheEntry& g = getCacheEntry(s);
 
     // Get corrected initial conditions.
-    const GeodesicInitialConditions g0 = calcCorrectedGeodesicInitConditions(g.KP, g.dKP, g.length, c);
+    const GeodesicInitialConditions g0 = GeodesicInitialConditions::CreateCorrected(g.KP, g.dKP, g.length, c);
 
 	// Shoot the new geodesic.
-	calcLocalGeodesicInfo(g0.x, g0.t, g0.l, g.sHint, updLocalGeodesicInfo(state));
+	calcGeodesic(g0, updCacheEntry(s));
 }
 
-const Surface::WrappingStatus& Surface::Impl::calcUpdatedStatus(
-        const State& state,
-        Vec3 prevPoint,
-        Vec3 nextPoint) const
-{
-    LocalGeodesicInfo& g = updLocalGeodesicInfo(state);
-
-    if (g.disabled) {return g;}
-
-    // Make sure that the previous point does not lie inside the surface.
-    if (m_Geometry.calcSurfaceValue(prevPoint)) {
-        // TODO use proper assert.
-        throw std::runtime_error("Unable to wrap over surface: Preceding point lies inside the surface");
-    }
-    if (m_Geometry.calcSurfaceValue(nextPoint)) {
-        // TODO use proper assert.
-        throw std::runtime_error("Unable to wrap over surface: Next point lies inside the surface");
-    }
-
-    // Update the tracking point.
-    ContactGeometry::PointOnLineResult result = m_Geometry.calcNearestPointOnLine(prevPoint, nextPoint, g.pointOnLine, m_TouchdownIter, m_TouchdownAccuracy);
-    g.pointOnLine = result.p; // TODO rename to point.
-
-    // Attempt touchdown.
-    if (g.liftoff) {
-        const bool touchdown = result.isInsideSurface;
-        g.liftoff = !touchdown;
-    }
-
-    // Detect liftoff.
-    if (!g.liftoff) {
-        g.liftoff = g.length == 0.;
-        g.liftoff &= dot(prevPoint - g.KP.p(), g.KP.R().getAxisUnitVec(NormalAxis)) <= 0.;
-        g.liftoff &= dot(nextPoint - g.KP.p(), g.KP.R().getAxisUnitVec(NormalAxis)) <= 0.;
-    }
-
-    return g;
-}
-
-size_t Surface::Impl::calcPathPoints(const State& state, std::vector<Vec3>& points) const
-{
-    size_t count = 0;
-    const LocalGeodesicInfo& g = getLocalGeodesicInfo(state);
-    for (Vec3 p: g.points) {
-        points.push_back(p);
-    }
-    return count;
-}
-
-void Surface::Impl::setInitialPointGuess(Vec3 pointGuess) {
-	throw std::runtime_error("NOTYETIMPLEMENTED");
-}
-
-Vec3 Surface::Impl::getInitialPointGuess() const {
-	throw std::runtime_error("NOTYETIMPLEMENTED");
-}
-
-//------------------------------------------------------------------------------
-//                               PRIVATE METHODS
-//------------------------------------------------------------------------------
-void Surface::Impl::calcLocalGeodesicInfo(Vec3 x, Vec3 t, Real l, Real sHint,
-        LocalGeodesicInfo& geodesic) const
+void Surface::calcGeodesic(const GeodesicInitialConditions& g0, CacheEntry& cache) const
 {
 	// Compute geodesic start boundary frame and variation.
-	m_Geometry.calcNearestFrenetFrameFast(x, t, geodesic.KP);
-	m_Geometry.calcGeodesicStartFrameVariation(geodesic.KP, geodesic.dKP);
+	m_Geometry.calcNearestFrenetFrameFast(g0.x, g0.t, cache.KP);
+	m_Geometry.calcGeodesicStartFrameVariation(cache.KP, cache.dKP);
 
     // Compute geodesic end boundary frame amd variation (shoot new geodesic).
 	m_Geometry.calcGeodesicEndFrameVariationImplicitly(
-			geodesic.KP.p(),
-			geodesic.KP.R().getAxisUnitVec(ContactGeometry::TangentAxis),
-			l,
-			sHint,
-			geodesic.KQ,
-			geodesic.dKQ,
-			geodesic.points);
+			cache.KP.p(),
+			cache.KP.R().getAxisUnitVec(ContactGeometry::TangentAxis),
+			g0.l,
+			cache.sHint,
+			cache.KQ,
+			cache.dKQ,
+			cache.points);
 
 	// TODO  update step size.
 	// TODO  update line tracking?
 	throw std::runtime_error("NOTYETIMPLEMENTED");
 }
 
+void Surface::calcStatus(const Vec3& prev_QS, const Vec3& next_PS, CacheEntry& cache) const
+{
+    LocalGeodesicInfo& g = cache;
+
+    if (g.status == Status::Disabled) {return;}
+
+    // Make sure that the previous point does not lie inside the surface.
+    if (m_Geometry.calcSurfaceValue(prev_QS)) {
+        // TODO use proper assert.
+        throw std::runtime_error("Unable to wrap over surface: Preceding point lies inside the surface");
+    }
+    if (m_Geometry.calcSurfaceValue(next_PS)) {
+        // TODO use proper assert.
+        throw std::runtime_error("Unable to wrap over surface: Next point lies inside the surface");
+    }
+
+    Vec3& pTrack = cache.trackingPointOnLine;
+
+    // Detect touchdown.
+    bool detectedTouchdown = g.status == Status::Liftoff;
+    detectedTouchdown &= m_Geometry.calcNearestPointOnLine(prev_QS, next_PS, pTrack, m_TouchdownIter, m_TouchdownAccuracy);
+    if (detectedTouchdown) {
+        g.status = Status::Ok;
+        GeodesicInitialConditions g0 = GeodesicInitialConditions::CreateAtTouchdown(prev_QS, next_PS, cache.trackingPointOnLine);
+        calcGeodesic(g0, cache);
+    }
+
+    // Detect liftoff.
+    bool detectedLiftoff = g.status == Status::Ok;
+    detectedLiftoff &= g.length == 0.;
+    detectedLiftoff &= dot(prev_QS - g.KP.p(), g.KP.R().getAxisUnitVec(NormalAxis)) > 0.;
+    detectedLiftoff &= dot(next_PS - g.KP.p(), g.KP.R().getAxisUnitVec(NormalAxis)) > 0.;
+    if (detectedLiftoff) {
+        g.status = Status::Liftoff;
+        pTrack = g.KP.p();
+    }
+}
+
+size_t Surface::calcPathPoints(const State& s, std::vector<Vec3>& points) const
+{
+    realizePosition(s);
+
+    size_t count = 0;
+    const CacheEntry& cache = getCacheEntry(s);
+    for (Vec3 p: cache.points) {
+        points.push_back(p);
+        ++count;
+    }
+	throw std::runtime_error("NOTYETIMPLEMENTED for analytic");
+    return count;
+}
+
+//------------------------------------------------------------------------------
+//                               PRIVATE METHODS
+//------------------------------------------------------------------------------
+
 //==============================================================================
 //                               OBSTACLE
 //==============================================================================
 
-void WrapObstacle::Impl::realizeTopology(State &state)
+bool WrapObstacle::Impl::isActive(const State& s) const
+{
+    return getPosInfo(s).status == Status::Ok;
+}
+
+void WrapObstacle::Impl::realizeTopology(State &s)
 {
 	// Allocate position level cache.
 	PosInfo posInfo {};
-	m_PosInfoIx = m_Subsystem.allocateCacheEntry(state, Stage::Position, new Value<PosInfo>(posInfo));
+	m_PosInfoIx = m_Subsystem.allocateCacheEntry(s, Stage::Position, new Value<PosInfo>(posInfo));
 }
 
-void WrapObstacle::Impl::realizePosition(const State &state) const
+void WrapObstacle::Impl::realizePosition(const State &s) const
 {
-	if (!m_Subsystem.isCacheValueRealized(state, m_PosInfoIx)) {
-		calcPosInfo(state, updPosInfo(state));
-		m_Subsystem.markCacheValueRealized(state, m_PosInfoIx);
+	if (!m_Subsystem.isCacheValueRealized(s, m_PosInfoIx)) {
+		calcPosInfo(s, updPosInfo(s));
+		m_Subsystem.markCacheValueRealized(s, m_PosInfoIx);
 	}
 }
 
-const WrapObstacle::Impl::PosInfo& WrapObstacle::Impl::getPosInfo(const State &state) const
+const WrapObstacle::Impl::PosInfo& WrapObstacle::Impl::getPosInfo(const State &s) const
 {
-    realizePosition(state);
-    return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(state, m_PosInfoIx));
+    realizePosition(s);
+    return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(s, m_PosInfoIx));
 }
 
-void WrapObstacle::Impl::applyGeodesicCorrection(const State& state, const WrapObstacle::Impl::Correction& c) const
+void WrapObstacle::Impl::applyGeodesicCorrection(const State& s, const WrapObstacle::Impl::Correction& c) const
 {
     // Apply correction to curve.
-    m_Surface.getImpl().applyGeodesicCorrection(state, c);
+    m_Surface.getImpl().applyGeodesicCorrection(s, c);
 
 	// Invalidate position level cache.
-	m_Subsystem.markCacheValueNotRealized(state, m_PosInfoIx);
+	m_Subsystem.markCacheValueNotRealized(s, m_PosInfoIx);
 }
 
 void WrapObstacle::Impl::calcPosInfo(
-		const State& state,
+		const State& s,
 		PosInfo& posInfo) const
 {
-    if(isDisabled(state))
+    if(isDisabled(s))
     {
         return;
     }
 
 	// Get tramsform from local surface frame to ground.
-	Transform X_GS = m_Mobod.getBodyTransform(state).compose(m_Offset);
+	Transform X_GS = m_Mobod.getBodyTransform(s).compose(m_Offset);
 
     // Get the path points before and after this segment.
-    Vec3 prev_G = m_Path.getImpl().findPrevPoint(state, m_PathSegmentIx);
-    Vec3 next_G = m_Path.getImpl().findNextPoint(state, m_PathSegmentIx);
+    Vec3 prev_G = m_Path.getImpl().findPrevPoint(s, m_PathSegmentIx);
+    Vec3 next_G = m_Path.getImpl().findNextPoint(s, m_PathSegmentIx);
 
     // Transform the prev and next path points to the surface frame.
     Vec3 prev_S = X_GS.shiftBaseStationToFrame(prev_G);
@@ -332,10 +366,10 @@ void WrapObstacle::Impl::calcPosInfo(
 
     // Detect liftoff, touchdown and potential invalid configurations.
     // TODO this doesnt follow the regular invalidation scheme...
-    m_Surface.getImpl().calcUpdatedStatus(state, prev_S, next_S);
+    m_Surface.getImpl().calcUpdatedStatus(s, prev_S, next_S);
 
 	// Grab the last geodesic that was computed.
-	const Surface::LocalGeodesic& geodesic_S = m_Surface.getImpl().getGeodesic(state);
+	const Surface::LocalGeodesic& geodesic_S = m_Surface.getImpl().getGeodesic(s);
 
     // Store the the local geodesic in ground frame.
     posInfo.KP = X_GS.compose(geodesic_S.KP);
@@ -361,10 +395,10 @@ void WrapObstacle::Impl::calcPosInfo(
     throw std::runtime_error("NOTYETIMPLEMENTED: Check transformation order");
 }
 
-void WrapObstacle::Impl::calcGeodesic(State& state, Vec3 x, Vec3 t, Real l) const
+void WrapObstacle::Impl::calcGeodesic(State& s, Vec3 x, Vec3 t, Real l) const
 {
-    m_Surface.getImpl().calcGeodesic(state, x, t, l);
-	m_Subsystem.markCacheValueNotRealized(state, m_PosInfoIx);
+    m_Surface.getImpl().calcGeodesic(s, x, t, l);
+	m_Subsystem.markCacheValueNotRealized(s, m_PosInfoIx);
 }
 
 //==============================================================================
@@ -380,25 +414,14 @@ namespace
     using Correction = ContactGeometry::GeodesicCorrection;
 /* using LocalGeodesic = WrapObstacle::LocalGeodesicInfo; */
 
-int countActive(const State& s, const std::vector<WrapObstacle>& obstacles)
-{
-    int n = 0;
-    for (const WrapObstacle& o : obstacles) {
-        if (o.isActive(s)) {
-            ++n;
-        }
-    }
-    return n;
-}
-
 const WrapObstacle* FindPrevActiveObstacle(
-	const State& state,
+	const State& s,
     const std::vector<WrapObstacle>& obs,
     size_t idx)
 {
     for (ptrdiff_t i = idx - 1; i > 0; --i) {
         // Find the active segment before the current.
-        if (obs.at(i).isActive(state)) {
+        if (obs.at(i).isActive(s)) {
             return &obs.at(i);
         }
     }
@@ -406,13 +429,13 @@ const WrapObstacle* FindPrevActiveObstacle(
 }
 
 const WrapObstacle* FindNextActiveObstacle(
-	const State& state,
+	const State& s,
     const std::vector<WrapObstacle>& obs,
     size_t idx)
 {
     // Find the active segment after the current.
     for (ptrdiff_t i = idx + 1; i < obs.size(); ++i) {
-        if (obs.at(i).isActive(state)) {
+        if (obs.at(i).isActive(s)) {
             return &obs.at(i);
         }
     }
@@ -465,45 +488,45 @@ GeodesicJacobian addPathErrorJacobian(
 //                                PATH IMPL
 //==============================================================================
 
-void WrappingPath::Impl::realizeTopology(State &state)
+void WrappingPath::Impl::realizeTopology(State &s)
 {
 	PosInfo posInfo {};
-	m_PosInfoIx = m_Subsystem.allocateCacheEntry(state, Stage::Position, new Value<PosInfo>(posInfo));
+	m_PosInfoIx = m_Subsystem.allocateCacheEntry(s, Stage::Position, new Value<PosInfo>(posInfo));
 }
 
-void WrappingPath::Impl::realizePosition(const State &state) const
+void WrappingPath::Impl::realizePosition(const State &s) const
 {
-	if (m_Subsystem.isCacheValueRealized(state, m_PosInfoIx)) {return;}
-	calcPosInfo(state, updPosInfo(state));
-	m_Subsystem.markCacheValueRealized(state, m_PosInfoIx);
+	if (m_Subsystem.isCacheValueRealized(s, m_PosInfoIx)) {return;}
+	calcPosInfo(s, updPosInfo(s));
+	m_Subsystem.markCacheValueRealized(s, m_PosInfoIx);
 }
 
-const WrappingPath::Impl::PosInfo& WrappingPath::Impl::getPosInfo(const State &state) const
+const WrappingPath::Impl::PosInfo& WrappingPath::Impl::getPosInfo(const State &s) const
 {
-	realizePosition(state);
-    return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(state, m_PosInfoIx));
+	realizePosition(s);
+    return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(s, m_PosInfoIx));
 }
 
-WrappingPath::Impl::PosInfo& WrappingPath::Impl::updPosInfo(const State &state) const
+WrappingPath::Impl::PosInfo& WrappingPath::Impl::updPosInfo(const State &s) const
 {
-    return Value<PosInfo>::updDowncast(m_Subsystem.updCacheEntry(state, m_PosInfoIx));
+    return Value<PosInfo>::updDowncast(m_Subsystem.updCacheEntry(s, m_PosInfoIx));
 }
 
-void WrappingPath::Impl::calcInitZeroLengthGeodesic(State& state, std::function<Vec3(size_t)> GetInitPointGuess) const
+void WrappingPath::Impl::calcInitZeroLengthGeodesic(State& s, std::function<Vec3(size_t)> GetInitPointGuess) const
 {
-	Vec3 prev = m_OriginBody.getBodyTransform(state).shiftFrameStationToBase(m_OriginPoint);
+	Vec3 prev = m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
 	size_t i = 0;
 	for (const WrapObstacle& obstacle: m_Obstacles) {
 	    Vec3 xGuess = GetInitPointGuess(++i);
-	    obstacle.getImpl().calcGeodesic(state, xGuess, xGuess - prev, 0.);
+	    obstacle.getImpl().calcGeodesic(s, xGuess, xGuess - prev, 0.);
 
-		prev = obstacle.getImpl().getPosInfo(state).KQ.p();
+		prev = obstacle.getImpl().getPosInfo(s).KQ.p();
 	}
 }
 
 template<size_t N>
 void WrappingPath::Impl::calcPathErrorVector(
-	const State& state,
+	const State& s,
     const std::vector<WrapObstacle>& obs,
     const std::vector<LineSegment>& lines,
     std::array<CoordinateAxis, N> axes,
@@ -513,11 +536,11 @@ void WrappingPath::Impl::calcPathErrorVector(
     ptrdiff_t row  = -1;
 
     for (const WrapObstacle& o : obs) {
-        if (!o.isActive(state)) {
+        if (!o.isActive(s)) {
             continue;
         }
 
-        const GeodesicInfo& g = o.getImpl().getPosInfo(state);
+        const GeodesicInfo& g = o.getImpl().getPosInfo(s);
         for (CoordinateAxis axis: axes) {
             pathError(++row)  = calcPathError(lines.at(lineIx), g.KP.R(), axis);
         }
@@ -530,14 +553,14 @@ void WrappingPath::Impl::calcPathErrorVector(
 
 template<size_t N>
 void WrappingPath::Impl::calcPathErrorJacobian(
-	const State& state,
+	const State& s,
     const std::vector<WrapObstacle>& obs,
     const std::vector<LineSegment>& lines,
     std::array<CoordinateAxis, N> axes,
     Matrix& J)
 {
     constexpr size_t Nq = GeodesicDOF;
-    const size_t n     = countActive(state, obs);
+    const size_t n     = countActive(s, obs);
 
     SimTK_ASSERT(J.rows() == n * N, "Invalid number of rows in jacobian matrix");
     SimTK_ASSERT(J.cols() == n * Nq, "Invalid number of columns in jacobian matrix");
@@ -545,16 +568,16 @@ void WrappingPath::Impl::calcPathErrorJacobian(
     size_t row = 0;
     size_t col = 0;
     for (size_t i = 0; i < n; ++i) {
-        if (!obs.at(i).isActive(state)) {
+        if (!obs.at(i).isActive(s)) {
             continue;
         }
-        const GeodesicInfo& g = obs.at(i).getImpl().getPosInfo(state);
+        const GeodesicInfo& g = obs.at(i).getImpl().getPosInfo(s);
 
         const LineSegment& l_P = lines.at(i);
         const LineSegment& l_Q = lines.at(i + 1);
 
-        const WrapObstacle* prev = FindPrevActiveObstacle(state, obs, i);
-        const WrapObstacle* next = FindNextActiveObstacle(state, obs, i);
+        const WrapObstacle* prev = FindPrevActiveObstacle(s, obs, i);
+        const WrapObstacle* next = FindNextActiveObstacle(s, obs, i);
 
         for (CoordinateAxis axis: axes) {
             const UnitVec3 a_P = g.KP.R().getAxisUnitVec(axis);
@@ -563,7 +586,7 @@ void WrappingPath::Impl::calcPathErrorJacobian(
 			addPathErrorJacobian(l_P, a_P, dK_P, J.block(row, col, 1, Nq));
 
 			if (prev) {
-				const Variation& prev_dK_Q = prev->getImpl().getPosInfo(state).dKQ;
+				const Variation& prev_dK_Q = prev->getImpl().getPosInfo(s).dKQ;
 				addDirectionJacobian(l_P, a_P, prev_dK_Q[1], J.block(row, col-Nq, 1, Nq), true);
 			}
 			++row;
@@ -576,7 +599,7 @@ void WrappingPath::Impl::calcPathErrorJacobian(
 			addPathErrorJacobian(l_Q, a_Q, dK_Q, J.block(row, col, 1, Nq), true);
 
 			if (next) {
-				const Variation& next_dK_P = next->getImpl().getPosInfo(state).dKP;
+				const Variation& next_dK_P = next->getImpl().getPosInfo(s).dKP;
 				addDirectionJacobian(l_Q, a_Q, next_dK_P[1], J.block(row, col+Nq, 1, Nq));
 			}
 			++row;
@@ -587,7 +610,7 @@ void WrappingPath::Impl::calcPathErrorJacobian(
 }
 
 double WrappingPath::Impl::calcPathLength(
-	const State& state,
+	const State& s,
     const std::vector<WrapObstacle>& obs,
     const std::vector<LineSegment>& lines)
 {
@@ -598,17 +621,17 @@ double WrappingPath::Impl::calcPathLength(
     }
 
     for (const WrapObstacle& obstacle : obs) {
-        if (!obstacle.isActive(state))
+        if (!obstacle.isActive(s))
 		{
             continue;
 		}
-        lTot += obstacle.getImpl().getPosInfo(state).length;
+        lTot += obstacle.getImpl().getPosInfo(s).length;
     }
     return lTot;
 }
 
 void WrappingPath::Impl::calcLineSegments(
-	const State& state,
+	const State& s,
     Vec3 p_O,
     Vec3 p_I,
     const std::vector<WrapObstacle>& obs,
@@ -620,11 +643,11 @@ void WrappingPath::Impl::calcLineSegments(
 
     Vec3 lineStart = std::move(p_O);
     for (const WrapObstacle& o : obs) {
-        if (!o.isActive(state)) {
+        if (!o.isActive(s)) {
             continue;
         }
 
-        const GeodesicInfo& g = o.getImpl().getPosInfo(state);
+        const GeodesicInfo& g = o.getImpl().getPosInfo(s);
         const Vec3 lineEnd = g.KP.p();
         lines.emplace_back(lineStart, lineEnd);
 
@@ -634,23 +657,34 @@ void WrappingPath::Impl::calcLineSegments(
 }
 
 Vec3 WrappingPath::Impl::FindPrevPoint(
-        const State& state,
+        const State& s,
         const Vec3& originPoint,
     const std::vector<WrapObstacle>& obs,
     size_t idx)
 {
-    const WrapObstacle* prev = FindPrevActiveObstacle(state, obs, idx);
-    return prev ? prev->getImpl().getPosInfo(state).KQ.p() : originPoint;
+    const WrapObstacle* prev = FindPrevActiveObstacle(s, obs, idx);
+    return prev ? prev->getImpl().getPosInfo(s).KQ.p() : originPoint;
 }
 
 Vec3 WrappingPath::Impl::FindNextPoint(
-        const State& state,
+        const State& s,
         const Vec3& terminationPoint,
     const std::vector<WrapObstacle>& obs,
     size_t idx)
 {
-    const WrapObstacle* next = FindNextActiveObstacle(state, obs, idx);
-    return next ? next->getImpl().getPosInfo(state).KP.p() : terminationPoint;
+    const WrapObstacle* next = FindNextActiveObstacle(s, obs, idx);
+    return next ? next->getImpl().getPosInfo(s).KP.p() : terminationPoint;
+}
+
+size_t WrappingPath::Impl::countActive(const State& s) const
+{
+    size_t count = 0;
+    for (const WrapObstacle& o : m_Obstacles) {
+        if (o.getImpl().isActive(s)) {
+            ++count;
+        }
+    }
+    return count;
 }
 
 void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const

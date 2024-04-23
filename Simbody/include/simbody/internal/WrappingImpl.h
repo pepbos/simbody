@@ -20,131 +20,6 @@ SimTK_DEFINE_UNIQUE_INDEX_TYPE(PathSegmentIndex);
 SimTK_DEFINE_UNIQUE_INDEX_TYPE(PathIndex);
 
 //==============================================================================
-//                      SURFACE IMPL
-//==============================================================================
-class Surface::Impl {
-    using FrenetFrame = ContactGeometry::FrenetFrame;
-    using Variation = ContactGeometry::GeodesicVariation;
-    using Correction = ContactGeometry::GeodesicCorrection;
-    using PointOnLineResult = ContactGeometry::PointOnLineResult;
-
-public:
-    Impl()                              = default;
-    ~Impl() = default;
-    Impl(Impl&&) noexcept            = default;
-    Impl& operator=(Impl&&) noexcept = default;
-
-    Impl(const Impl&)                = delete;
-    Impl& operator=(const Impl&)     = delete;
-
-    struct GeodesicInitialConditions
-    {
-        Vec3 x {NaN, NaN, NaN};
-        Vec3 t {NaN, NaN, NaN};
-        Real l = NaN;
-    };
-
-    struct LocalGeodesicInfo : Surface::LocalGeodesic, Surface::WrappingStatus
-    {
-        std::vector<Vec3> points {};
-        double sHint = NaN;
-    };
-
-    Impl(
-            WrappingPathSubsystem subsystem,
-            ContactGeometry geometry,
-            Vec3 initPointGuess
-            ) : 
-        m_Subsystem(subsystem),
-        m_Geometry(geometry),
-        m_InitPointGuess(initPointGuess)
-    {}
-
-    // Allocate state variables and cache entries.
-    void realizeTopology(State& state);
-    // TODO requires all levels?
-    void realizeInstance(const State& state) const;
-    void realizePosition(const State& state) const;
-    void realizeVelocity(const State& state) const;
-    void realizeAcceleration(const State& state) const;
-    // Requires invalidateTopology?
-    /* void invalidateTopology() */
-    /* {   m_Subsystem.invalidateSubsystemTopologyCache(); } */
-
-    // The virtual methods:
-    // 1. calcGeodesic()
-    // 2. calcPointOnLineNearSurface
-    // 3. isPointAboveSurface
-    // 4. calcPathPoints
-
-    // 1. calcGeodesic
-    const LocalGeodesic& calcGeodesic(State& state, Vec3 x, Vec3 t, Real l) const;
-    /* void calcGeodesic(GeodesicInitialConditions g0, Real sHint, LocalGeodesic& geodesic) const; */
-    /* void calcGeodesic(Vec3 x, Vec3 t, Real l, Real sHint, LocalGeodesic& geodesic) const; */
-    const LocalGeodesic& getGeodesic(const State& state) const {return getLocalGeodesicInfo(state);}
-    void applyGeodesicCorrection(const State& state, const Correction& c) const;
-
-    // TODO rename
-    bool isActive(const State& state) const;
-    bool isDisabled(const State& state) const;
-
-    // 4. calcPathPoints
-    size_t calcPathPoints(const State& state, std::vector<Vec3>& points) const;
-
-    // Detect liftoff or touchdown, and compute the point on line near the surface.
-    const WrappingStatus& calcUpdatedStatus(const State& state, Vec3 prev, Vec3 next) const;
-
-    // TODO should be in OpenSim?
-    void setInitialPointGuess(Vec3 pointGuess);
-    Vec3 getInitialPointGuess() const;
-
-private:
-    const LocalGeodesicInfo& getLocalGeodesicInfo(const State& state) const
-    {
-        realizePosition(state);
-        return Value<LocalGeodesicInfo>::downcast(
-                m_Subsystem.getDiscreteVarUpdateValue(state, m_GeodesicInfoIx)
-                );
-    }
-
-    LocalGeodesicInfo& updLocalGeodesicInfo(const State& state) const
-    {
-        return Value<LocalGeodesicInfo>::updDowncast(
-                m_Subsystem.updDiscreteVarUpdateValue(state, m_GeodesicInfoIx)
-                );
-    }
-
-    const LocalGeodesicInfo& getPrevLocalGeodesicInfo(const State& state) const
-    {
-        return Value<LocalGeodesicInfo>::downcast(
-                m_Subsystem.getDiscreteVariable(state, m_GeodesicInfoIx)
-                );
-    }
-
-    LocalGeodesicInfo& updPrevLocalGeodesicInfo(State& state) const
-    {
-        return Value<LocalGeodesicInfo>::updDowncast(
-                m_Subsystem.updDiscreteVariable(state, m_GeodesicInfoIx)
-                );
-    }
-
-    void calcLocalGeodesicInfo(Vec3 x, Vec3 t, Real l, Real sHint,
-            LocalGeodesicInfo& geodesic) const;
-
-//------------------------------------------------------------------------------
-    WrappingPathSubsystem m_Subsystem;
-
-    ContactGeometry m_Geometry;
-
-    Vec3 m_InitPointGuess;
-
-    Real m_TouchdownAccuracy = 1e-3;
-    size_t m_TouchdownIter = 10;
-
-    DiscreteVariableIndex m_GeodesicInfoIx;
-};
-
-//==============================================================================
 //                                OBSTACLE IMPL
 //==============================================================================
 class WrapObstacle::Impl
@@ -153,10 +28,10 @@ class WrapObstacle::Impl
     using Variation = ContactGeometry::GeodesicVariation;
     using Correction = ContactGeometry::GeodesicCorrection;
 
-private:
+    private:
     Impl()                                      = default;
 
-public:
+    public:
     Impl(const Impl& source)            = default;
     Impl& operator=(const Impl& source) = default;
     ~Impl()                                     = default;
@@ -171,7 +46,7 @@ public:
             const Transform& X_BS,
             ContactGeometry geometry,
             Vec3 initPointGuess
-            ) : 
+        ) : 
         m_Subsystem(subsystem),
         m_Mobod(mobod),
         m_Offset(X_BS),
@@ -224,12 +99,142 @@ public:
 
     size_t calcPathPoints(const State& state, std::vector<Vec3>& points) const;
     void applyGeodesicCorrection(const State& state, const ContactGeometry::GeodesicCorrection& c) const;
+    void calcInitZeroLengthGeodesic(State& state, Vec3 prev_QS);
 
-    void calcPosInfo(const State& state, Vec3 prev, Vec3 next, size_t maxIter, Real eps) const;
+    private:
+    void calcPosInfo(const State& state, PosInfo& posInfo) const;
     void calcGeodesic(State& state, Vec3 x, Vec3 t, Real l) const;
 
-private:
-    void calcPosInfo(const State& state, PosInfo& posInfo) const;
+    public: // TODO public?
+    //==============================================================================
+    //                      SURFACE
+    //==============================================================================
+    // Represents the local surface wrapping problem.
+    // Caches last computed geodesic as a warmstart.
+    // Not exposed outside of simbody.
+    // Not shared amongst different paths or obstacles.
+    class Surface
+    {
+        using FrenetFrame = ContactGeometry::FrenetFrame;
+        using Variation = ContactGeometry::GeodesicVariation;
+        using Correction = ContactGeometry::GeodesicCorrection;
+
+        public:
+        Surface()                              = default;
+        ~Surface() = default;
+        Surface(Surface&&) noexcept            = default;
+        Surface& operator=(Surface&&) noexcept = default;
+        Surface(const Surface&)                = delete;
+        Surface& operator=(const Surface&)     = delete;
+
+        Surface(
+                WrappingPathSubsystem subsystem,
+                ContactGeometry geometry,
+                Vec3 initPointGuess
+               ) : 
+            m_Subsystem(subsystem),
+            m_Geometry(geometry),
+            m_InitPointGuess(initPointGuess)
+        {}
+
+        // Allocate state variables and cache entries.
+        void realizeTopology(State& state);
+        void realizePosition(const State& state) const;
+
+        struct LocalGeodesicInfo
+        {
+            FrenetFrame KP {};
+            FrenetFrame KQ {};
+
+            Real length = NaN;
+
+            Variation dKP {};
+            Variation dKQ {};
+
+            Status status = Status::Ok;
+        };
+
+        struct GeodesicInitialConditions
+        {
+            private:
+                GeodesicInitialConditions() = default;
+
+            public:
+            static GeodesicInitialConditions CreateCorrected(const FrenetFrame& KP, const Variation& dKP, Real l, const Correction& c);
+            static GeodesicInitialConditions CreateInSurfaceFrame(const Transform& X_GS, Vec3 x_G, Vec3 t_G, Real l);
+            static GeodesicInitialConditions CreateZeroLengthGuess(const Transform& X_GS, Vec3 prev_QS, Vec3 xGuess_S);
+            static GeodesicInitialConditions CreateAtTouchdown(Vec3 prev_QS, Vec3 next_PS, Vec3 trackingPointOnLine);
+
+            Vec3 x {NaN, NaN, NaN};
+            Vec3 t {NaN, NaN, NaN};
+            Real l = NaN;
+        };
+
+        const LocalGeodesicInfo& calcInitialGeodesic(State& s, const GeodesicInitialConditions& g0) const;
+        // TODO weird name...
+        const LocalGeodesicInfo& calcLocalGeodesic(const State& s, Vec3 prev_QS, Vec3 next_PS) const;
+        void applyGeodesicCorrection(const State& s, const Correction& c) const;
+
+        // 4. calcPathPoints
+        size_t calcPathPoints(const State& state, std::vector<Vec3>& points) const;
+
+        void setInitialPointGuess(Vec3 initPointGuess) {m_InitPointGuess = initPointGuess;}
+        Vec3 getInitialPointGuess() const {return m_InitPointGuess;}
+
+        private:
+
+        struct CacheEntry : LocalGeodesicInfo
+        {
+            Vec3 trackingPointOnLine {NaN, NaN, NaN};
+            std::vector<Vec3> points {};
+            double sHint = NaN;
+        };
+
+        const CacheEntry& getCacheEntry(const State& state) const
+        {
+            return Value<CacheEntry>::downcast(
+                    m_Subsystem.getDiscreteVarUpdateValue(state, m_CacheIx)
+                    );
+        }
+
+        CacheEntry& updCacheEntry(const State& state) const
+        {
+            return Value<CacheEntry>::updDowncast(
+                    m_Subsystem.updDiscreteVarUpdateValue(state, m_CacheIx)
+                    );
+        }
+
+        const CacheEntry& getPrevCacheEntry(const State& state) const
+        {
+            return Value<CacheEntry>::downcast(
+                    m_Subsystem.getDiscreteVariable(state, m_CacheIx)
+                    );
+        }
+
+        CacheEntry& updPrevCacheEntry(State& state) const
+        {
+            return Value<CacheEntry>::updDowncast(
+                    m_Subsystem.updDiscreteVariable(state, m_CacheIx)
+                    );
+        }
+
+        void calcStatus(const Vec3& prev_QS, const Vec3& next_PS, CacheEntry& cache) const;
+        void calcGeodesic(const GeodesicInitialConditions& g0, CacheEntry& cache) const;
+
+        //------------------------------------------------------------------------------
+        WrappingPathSubsystem m_Subsystem;
+
+        ContactGeometry m_Geometry;
+
+        Vec3 m_InitPointGuess;
+
+        Real m_TouchdownAccuracy = 1e-3;
+        size_t m_TouchdownIter = 10;
+
+        DiscreteVariableIndex m_CacheIx;
+    };
+
+    private:
 
     // TODO Required for accessing the cache variable?
     WrappingPathSubsystem m_Subsystem; // The subsystem this segment belongs to.
@@ -301,6 +306,8 @@ class WrappingPath::Impl {
     private:
         PosInfo& updPosInfo(const State& s) const;
         void calcPosInfo(const State& s, PosInfo& posInfo) const;
+
+        size_t countActive(const State& s) const;
 
         Vec3 findPrevPoint(
                 const State& state,
