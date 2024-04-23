@@ -1,17 +1,79 @@
 #include "SimTKcommon/internal/CoordinateAxis.h"
+#include "SimTKcommon/internal/ExceptionMacros.h"
 #include "SimTKmath.h"
 #include "Wrapping.h"
 #include "WrappingImpl.h"
 #include "simmath/internal/ContactGeometry.h"
+#include <cstddef>
 #include <stdexcept>
 
 using namespace SimTK;
 
+using GeodesicInfo = WrapObstacle::Impl::PosInfo;
+
+//==============================================================================
+//                                CONSTANTS
+//==============================================================================
+namespace {
+    static const CoordinateAxis TangentAxis = ContactGeometry::TangentAxis;
+    static const CoordinateAxis NormalAxis = ContactGeometry::NormalAxis;
+    static const CoordinateAxis BinormalAxis = ContactGeometry::BinormalAxis;
+    static const int GeodesicDOF = 4;
+}
+
+//==============================================================================
+//                                SOLVER
+//==============================================================================
+
+namespace {
+    struct SolverData;
+
+    struct SolverData 
+    {
+        // A * x = b
+        Matrix A;
+        Vector x;
+        Vector b;
+    };
+
+    struct SolverDataCache
+    {
+        SolverDataCache(std::mutex&& cacheMutex) :
+            m_guard(cacheMutex) {}
+
+        void setDataPtr(SolverData* ptr) {m_data = ptr;}
+
+        SolverData& updData() {return *m_data;}
+
+        private:
+        std::lock_guard<std::mutex> m_guard;
+        SolverData* m_data = nullptr;
+    };
+
+    SolverDataCache&& updSolverDataCache(size_t nActive)
+    {
+        static constexpr int Q = 4;
+        static constexpr int C = 4;
+        static std::vector<SolverData> s_GlobalCache {};
+        static std::mutex s_GlobalLock {};
+
+        SolverDataCache data(std::move(s_GlobalLock));
+
+        for (size_t i = s_GlobalCache.size(); i < nActive - 1; ++i) {
+            int n = i + 1;
+            s_GlobalCache.emplace_back(
+                    Matrix{C * n, Q * n, 0.},
+                    Vector{Q * n, 0.},
+                    Vector{C * n, 0.});
+        }
+
+        return std::move(data);
+    }
+} // namespace
+
 //==============================================================================
 //                                SOME MATH
 //==============================================================================
-namespace
-{
 
 namespace {
     using FrenetFrame = ContactGeometry::FrenetFrame;
@@ -261,7 +323,6 @@ namespace
     using FrameVariation = ContactGeometry::GeodesicFrameVariation;
     using Variation = ContactGeometry::GeodesicVariation;
     using Correction = ContactGeometry::GeodesicCorrection;
-    using Geodesic = WrapObstacle::Impl::PosInfo;
 /* using LocalGeodesic = WrapObstacle::LocalGeodesicInfo; */
 
 int countActive(const State& s, const std::vector<WrapObstacle>& obstacles)
@@ -275,11 +336,103 @@ int countActive(const State& s, const std::vector<WrapObstacle>& obstacles)
     return n;
 }
 
+const WrapObstacle* FindPrevActiveObstacle(
+	const State& state,
+    const std::vector<WrapObstacle>& obs,
+    size_t idx)
+{
+    for (ptrdiff_t i = idx - 1; i > 0; --i) {
+        // Find the active segment before the current.
+        if (obs.at(i).isActive(state)) {
+            return &obs.at(i);
+        }
+    }
+    return nullptr;
+}
+
+const WrapObstacle* FindNextActiveObstacle(
+	const State& state,
+    const std::vector<WrapObstacle>& obs,
+    size_t idx)
+{
+    // Find the active segment after the current.
+    for (ptrdiff_t i = idx + 1; i < obs.size(); ++i) {
+        if (obs.at(i).isActive(state)) {
+            return &obs.at(i);
+        }
+    }
+    return nullptr;
+}
+
+static const int N_PATH_CONSTRAINTS = 4;
+
+// TODO this is awkward
+void addBlock(
+        const Vec4& values,
+    Matrix& block)
+{
+    for (int i = 0; i < Vec4::size(); ++i) {
+        block[0][i] = values[i];
+    }
+}
+
+void addDirectionJacobian(
+    const LineSegment& e,
+	const UnitVec3& axis,
+    const PointVariation& dx,
+    Matrix& J,
+    bool invert = false)
+{
+    Vec3 y = axis - e.d * dot(e.d,axis);
+    y /= e.l * (invert ? 1. : -1);
+    addBlock(~dx * y, J);
+}
+
+double calcPathError(const LineSegment& e, const Rotation& R, CoordinateAxis axis)
+{
+    return dot(e.d, R.getAxisUnitVec(axis));
+}
+
+GeodesicJacobian addPathErrorJacobian(
+    const LineSegment& e,
+	const UnitVec3& axis,
+    const Variation& dK,
+	Matrix& J,
+    bool invertV = false)
+{
+	addDirectionJacobian(e, axis, dK[1], J, invertV);
+	addBlock(~dK[0] * cross(axis,e.d), J);
+}
+
 }
 
 //==============================================================================
 //                                PATH IMPL
 //==============================================================================
+
+void WrappingPath::Impl::realizeTopology(State &state)
+{
+	PosInfo posInfo {};
+	m_PosInfoIx = m_Subsystem.allocateCacheEntry(state, Stage::Position, new Value<PosInfo>(posInfo));
+}
+
+void WrappingPath::Impl::realizePosition(const State &state) const
+{
+	if (m_Subsystem.isCacheValueRealized(state, m_PosInfoIx)) {return;}
+	calcPosInfo(updPosInfo(state));
+	m_Subsystem.markCacheValueRealized(state, m_PosInfoIx);
+}
+
+const WrappingPath::Impl::PosInfo& WrappingPath::Impl::getPosInfo(const State &state) const
+{
+	realizePosition(state);
+    return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(state, m_PosInfoIx));
+}
+
+WrappingPath::Impl::PosInfo& WrappingPath::Impl::updPosInfo(const State &state) const
+{
+    return Value<PosInfo>::updDowncast(m_Subsystem.updCacheEntry(state, m_PosInfoIx));
+}
 
 void WrappingPath::Impl::calcInitZeroLengthGeodesic(State& state, std::function<Vec3(size_t)> GetInitPointGuess) const
 {
@@ -293,218 +446,93 @@ void WrappingPath::Impl::calcInitZeroLengthGeodesic(State& state, std::function<
 	}
 }
 
-//==============================================================================
-//                                WRAP OBSTACLE IMPL
-//==============================================================================
-
-namespace
-{
-
-static const int N_PATH_CONSTRAINTS = 4;
-
-using ActiveLambda = std::function<
-    void(size_t prev, size_t next, size_t current, bool isActive)>;
-
-void CallCurrentWithPrevAndNext(
-    size_t prev,
-    size_t next,
-    size_t current,
-    bool isActive,
-    ActiveLambda& f)
-{
-    f(prev, next, current, isActive);
-}
-
-template <typename... FUNCS>
-void CallCurrentWithPrevAndNext(
-    size_t prev,
-    size_t next,
-    size_t current,
-    bool isActive,
-    ActiveLambda& f,
-    FUNCS&&... fs)
-{
-    f(prev, next, current, isActive);
-    CallCurrentWithPrevAndNext(
-        prev,
-        next,
-        current,
-        isActive,
-        std::forward<FUNCS>(fs)...);
-}
-
-template <typename... FUNCS>
-void MapWithPrevAndNext(
-	const State& s,
-    const std::vector<WrapObstacle>& obs,
-    ActiveLambda& f,
-    FUNCS&&... fs)
-{
-    const ptrdiff_t n = obs.size();
-    ptrdiff_t next    = 0;
-    ptrdiff_t prev    = -1;
-
-    for (ptrdiff_t i = 0; i < n; ++i) {
-        // Find the active segment before the current.
-        if (i > 0) {
-            if (obs.at(i - 1).isActive(s)) {
-                prev = i - 1;
-            }
-        }
-
-        // Find the active segment after the current.
-        if (next <= i) {
-            for (; ++next < n;) {
-                const WrapObstacle& o = obs.at(next);
-                if (o.isActive(s)) {
-                    break;
-                }
-            }
-        }
-
-        CallCurrentWithPrevAndNext(
-            prev < 0 ? n : prev,
-            next,
-            i,
-            obs.at(i).isActive(s),
-            f,
-            std::forward<FUNCS>(fs)...);
-    }
-}
-
-void addDirectionJacobian(
-    const LineSegment& e,
-	const UnitVec3& axis,
-    const PointVariation& dx,
-    MatrixView J,
-    bool invert = false)
-{
-    Vec3 y = axis - e.d * dot(e.d,axis);
-    y /= e.l * (invert ? 1. : -1);
-    J += ~dx * y;
-}
-
-double calcPathError(const LineSegment& e, const Rotation& R, CoordinateAxis axis)
-{
-    return dot(e.d, R.getAxisUnitVec(axis));
-}
-
-GeodesicJacobian addPathErrorJacobian(
-    const LineSegment& e,
-	const UnitVec3& axis,
-    const Variation& dK,
-	MatrixView J,
-    bool invertV = false)
-{
-	addDirectionJacobian(e, axis, dK[1], J, invertV);
-    J += cross(axis,e.d).transpose() * dK[0];
-}
-
-void calcPathError(
+template<size_t N>
+void WrappingPath::Impl::calcPathErrorVector(
 	const State& state,
     const std::vector<WrapObstacle>& obs,
     const std::vector<LineSegment>& lines,
+    std::array<CoordinateAxis, N> axes,
     Vector& pathError)
 {
-    size_t i      = 0;
-    ptrdiff_t row = -1;
+    size_t lineIx = 0;
+    ptrdiff_t row  = -1;
+
     for (const WrapObstacle& o : obs) {
-        const Geodesic& g = o.getGeodesic(state);
-        pathError(++row)  = calcPathError(lines.at(i), g.KP.R(), NormalAxis);
-        pathError(++row)  = calcPathError(lines.at(i), g.KP.R(), BinormalAxis);
-        ++i;
-        pathError(++row)  = calcPathError(lines.at(i), g.KQ.R(), NormalAxis);
-        pathError(++row)  = calcPathError(lines.at(i), g.KQ.R(), BinormalAxis);
+        if (!o.isActive(state)) {
+            continue;
+        }
+
+        const GeodesicInfo& g = o.getImpl().getPosInfo(state);
+        for (CoordinateAxis axis: axes) {
+            pathError(++row)  = calcPathError(lines.at(lineIx), g.KP.R(), axis);
+        }
+        ++lineIx;
+        for (CoordinateAxis axis: axes) {
+            pathError(++row)  = calcPathError(lines.at(lineIx), g.KQ.R(), axis);
+        }
     }
 }
 
-void writePathErrorJaobianBlock(
-		const Transform& K,
-		const Variation& dK,
-		const LineSegment& l,
-		MatrixView J)
-{
-	const UnitVec3 nP = K.R().getAxisUnitVec(NormalAxis);
-	const UnitVec3 bP = K.R().getAxisUnitVec(BinormalAxis);
-	
-}
-
-void calcPathErrorJacobian(
-	const State& s,
+template<size_t N>
+void WrappingPath::Impl::calcPathErrorJacobian(
+	const State& state,
     const std::vector<WrapObstacle>& obs,
     const std::vector<LineSegment>& lines,
+    std::array<CoordinateAxis, N> axes,
     Matrix& J)
 {
-    constexpr size_t Q = GeodesicDOF;
-    constexpr size_t C = N_PATH_CONSTRAINTS;
-    const size_t n     = countActive(s, obs);
+    constexpr size_t Nq = GeodesicDOF;
+    const size_t n     = countActive(state, obs);
 
-    J.resize(n * C, n * Q);
+    SimTK_ASSERT(J.rows() == n * N, "Invalid number of rows in jacobian matrix");
+    SimTK_ASSERT(J.cols() == n * Nq, "Invalid number of columns in jacobian matrix");
 
     size_t row = 0;
     size_t col = 0;
-    Vec4 block { NaN, NaN, NaN, NaN,};
-
-    ActiveLambda f = [&](size_t prevIx, size_t nextIx, size_t i, bool isActive) {
-        if (!isActive) {
-            return;
+    for (size_t i = 0; i < n; ++i) {
+        if (!obs.at(i).isActive(state)) {
+            continue;
         }
+        const GeodesicInfo& g = obs.at(i).getImpl().getPosInfo(state);
 
-        const Geodesic& g = obs.at(i).getGeodesic(s);
+        const LineSegment& l_P = lines.at(i);
+        const LineSegment& l_Q = lines.at(i + 1);
 
-		{
-			const LineSegment& l_P = lines.at(i);
+        const WrapObstacle* prev = FindPrevActiveObstacle(state, obs, i);
+        const WrapObstacle* next = FindNextActiveObstacle(state, obs, i);
 
-			const UnitVec3 nP = g.KP.R().getAxisUnitVec(NormalAxis);
-			const UnitVec3 bP = g.KP.R().getAxisUnitVec(BinormalAxis);
+        for (CoordinateAxis axis: axes) {
+            const UnitVec3 a_P = g.KP.R().getAxisUnitVec(axis);
+            const Variation& dK_P = g.dKP;
 
-			addPathErrorJacobian(l_P, nP, g.dKP, J.block(row, col, 1, Q));
-			addPathErrorJacobian(l_P, bP, g.dKP, J.block(row + 1, col, 1, Q));
+			addPathErrorJacobian(l_P, a_P, dK_P, J.block(row, col, 1, Nq));
 
-			if (prevIx != n) {
-				const Geodesic& prev = obs.at(prevIx).getGeodesic(s);
-
-				addDirectionJacobian(l_P, nP, prev.dKP[1], J.block(row, col-Q, 1, Q), true);
-				addDirectionJacobian(l_P, bP, prev.dKP[1], J.block(row + 1, col-Q, 1, Q), true);
-			}
-			row += 2;
-		}
-
-		// TODO looked like this
-		/* calcPathErrorJacobian(l_Q, a_Q, g.v_Q, g.w_Q, true); */
-		// dx_P  dR_P
-		// addDirectionJacobian(l_Q, n_Q, prev.dx_P, J.block())
-		{
-			const LineSegment& l_Q = lines.at(i + 1);
-
-			const UnitVec3 nQ = g.KQ.R().getAxisUnitVec(NormalAxis);
-			const UnitVec3 bQ = g.KQ.R().getAxisUnitVec(BinormalAxis);
-
-			addPathErrorJacobian(l_Q, nQ, g.dKQ, J.block(row, col, 1, Q), true);
-			addPathErrorJacobian(l_Q, bQ, g.dKQ, J.block(row + 1, col, 1, Q), true);
-
-			if (nextIx != n) {
-				/* pathErrorJacobian.block<1, Q>(row, col + Q) = */
-				/* 	calcDirectionJacobian(l_Q, a_Q, obs.at(next).getGeodesic().v_P); */
-
-				const Geodesic& next = obs.at(nextIx).getGeodesic(s);
-
-				addDirectionJacobian(l_Q, nQ, next.dKP[1], J.block(row, col+Q, 1, Q));
-				addDirectionJacobian(l_Q, bQ, next.dKP[1], J.block(row + 1, col+Q, 1, Q));
+			if (prev) {
+				const Variation& prev_dK_Q = prev->getImpl().getPosInfo(state).dKQ;
+				addDirectionJacobian(l_P, a_P, prev_dK_Q[1], J.block(row, col-Nq, 1, Nq), true);
 			}
 			++row;
 		}
 
-        col += Q;
-    };
+        for (CoordinateAxis axis: axes) {
+            const UnitVec3 a_Q = g.KQ.R().getAxisUnitVec(axis);
+            const Variation& dK_Q = g.dKQ;
 
-    MapWithPrevAndNext(s, obs, f);
+			addPathErrorJacobian(l_Q, a_Q, dK_Q, J.block(row, col, 1, Nq), true);
+
+			if (next) {
+				const Variation& next_dK_P = next->getImpl().getPosInfo(state).dKP;
+				addDirectionJacobian(l_Q, a_Q, next_dK_P[1], J.block(row, col+Nq, 1, Nq));
+			}
+			++row;
+		}
+
+        col += Nq;
+    };
 }
 
-void calcPathCorrections(const State& s, const std::vector<WrapObstacle>& obs, const Vector& pathError, const Matrix& pathErrorJacobian, Matrix& pathMatrix, Vector& pathCorrections);
-
-double calcPathLength(
-	const State& s,
+double WrappingPath::Impl::calcPathLength(
+	const State& state,
     const std::vector<WrapObstacle>& obs,
     const std::vector<LineSegment>& lines)
 {
@@ -515,17 +543,17 @@ double calcPathLength(
     }
 
     for (const WrapObstacle& obstacle : obs) {
-        if (!obstacle.isActive(s))
+        if (!obstacle.isActive(state))
 		{
             continue;
 		}
-        lTot += obstacle.getGeodesic(s).length;
+        lTot += obstacle.getImpl().getPosInfo(state).length;
     }
     return lTot;
 }
 
-void calcLineSegments(
-	const State& s,
+void WrappingPath::Impl::calcLineSegments(
+	const State& state,
     Vec3 p_O,
     Vec3 p_I,
     const std::vector<WrapObstacle>& obs,
@@ -536,19 +564,109 @@ void calcLineSegments(
     lines.clear();
 
     Vec3 lineStart = std::move(p_O);
-    for (size_t i = 0; i < n; ++i) {
-        if (!obs.at(i).isActive(s)) {
+    for (const WrapObstacle& o : obs) {
+        if (!o.isActive(state)) {
             continue;
         }
 
-        const Geodesic& g = obs.at(i).getGeodesic(s);
-        const Vec3 lineEnd   = g.KP.p();
+        const GeodesicInfo& g = o.getImpl().getPosInfo(state);
+        const Vec3 lineEnd = g.KP.p();
         lines.emplace_back(lineStart, lineEnd);
 
         lineStart = g.KQ.p();
     }
     lines.emplace_back(lineStart, p_I);
 }
+
+Vec3 WrappingPath::Impl::FindPrevPoint(
+        const State& state,
+        const Vec3& originPoint,
+    const std::vector<WrapObstacle>& obs,
+    size_t idx)
+{
+    const WrapObstacle* prev = FindPrevActiveObstacle(state, obs, idx);
+    return prev ? prev->getImpl().getPosInfo(state).KQ.p() : originPoint;
+}
+
+Vec3 WrappingPath::Impl::FindNextPoint(
+        const State& state,
+        const Vec3& terminationPoint,
+    const std::vector<WrapObstacle>& obs,
+    size_t idx)
+{
+    const WrapObstacle* next = FindNextActiveObstacle(state, obs, idx);
+    return next ? next->getImpl().getPosInfo(state).KP.p() : terminationPoint;
+}
+
+size_t WrappingPath::Impl::CalcUpdatedObstaclePosInfo(
+        const State& s,
+        const Vec3& x_O,
+        const Vec3& x_I,
+        const std::vector<WrapObstacle>& obs, size_t maxIter, Real eps)
+{
+    size_t countActive = 0;
+    for (size_t i = 0; i < obs.size(); ++i) {
+        if (!obs.at(i).isActive(s)) {
+            continue;
+        }
+
+        Vec3 prev = FindPrevPoint(s, x_O, obs, i);
+        Vec3 next = FindPrevPoint(s, x_I, obs, i);
+        obs.at(i).getImpl().calcPosInfo(s, prev, next, maxIter, eps);
+    }
+}
+
+void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
+{
+	// Path oigin and termination points.
+	const Vec3 x_O = m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
+	const Vec3 x_I = m_TerminationBody.getBodyTransform(s).shiftFrameStationToBase(m_TerminationPoint);
+
+	const std::array<CoordinateAxis, 2> axes {NormalAxis, BinormalAxis};
+
+    for (posInfo.loopIter = 0; posInfo.loopIter < m_PathMaxIter; ++posInfo.loopIter) {
+        // Things have changed: recompute the position level cache of the obstacles.
+        CalcUpdatedObstaclePosInfo(s, x_O, x_I, m_Obstacles, m_ObsMaxIter, m_ObsErrorBound);
+
+        // Compute the straight-line segments.
+        calcLineSegments(s, x_O, x_I, m_Obstacles, posInfo.lines);
+
+        // Evaluate path error, and stop when converged.
+        calcPathErrorVector<2>(s, m_Obstacles, posInfo.lines, axes, posInfo.pathError);
+        const Real maxPathError = posInfo.pathError.normInf();
+        if (maxPathError < m_PathErrorBound) {
+            return;
+        }
+
+        // Evaluate the path error jacobian.
+        calcPathErrorJacobian<2>(s, m_Obstacles, posInfo.lines, axes, posInfo.pathErrorJacobian);
+
+        // Compute path corrections.
+        calcPathCorrections(s, m_Obstacles, posInfo.pathError, posInfo.pathErrorJacobian, posInfo.pathMatrix, posInfo.pathCorrections);
+
+        // Apply path corrections.
+		throw std::runtime_error("NOTYETIMPLEMENTED");
+		const Correction* corrIt = nullptr; // TODO
+        for (const WrapObstacle& obstacle : m_Obstacles) {
+            if (!obstacle.isActive(s)) {
+                continue;
+            }
+            obstacle.getImpl().applyGeodesicCorrection(s, *corrIt);
+            ++corrIt;
+        }
+    }
+
+	throw std::runtime_error("Failed to converge");
+}
+
+//==============================================================================
+//                                WRAP OBSTACLE IMPL
+//==============================================================================
+
+namespace
+{
+
+void calcPathCorrections(const State& s, const std::vector<WrapObstacle>& obs, const Vector& pathError, const Matrix& pathErrorJacobian, Matrix& pathMatrix, Vector& pathCorrections);
 
 }
 
@@ -600,105 +718,3 @@ getPath(WrappingPathIndex cableIx) const
 WrappingPath& WrappingPathSubsystem::
 updPath(WrappingPathIndex cableIx)
 {   return updImpl().updCablePath(cableIx); }
-
-
-//==============================================================================
-//                               WRAPPING PATH
-//==============================================================================
-
-void WrappingPath::Impl::realizeTopology(State &state)
-{
-	PosInfo posInfo {};
-	m_PosInfoIx = m_Subsystem.allocateCacheEntry(state, Stage::Position, new Value<PosInfo>(posInfo));
-}
-
-void WrappingPath::Impl::realizePosition(const State &state) const
-{
-	if (m_Subsystem.isCacheValueRealized(state, m_PosInfoIx)) {return;}
-	calcPosInfo(updPosInfo(state));
-	m_Subsystem.markCacheValueRealized(state, m_PosInfoIx);
-}
-
-const WrappingPath::Impl::PosInfo& WrappingPath::Impl::getPosInfo(const State &state) const
-{
-	realizePosition(state);
-    return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(state, m_PosInfoIx));
-}
-
-WrappingPath::Impl::PosInfo& WrappingPath::Impl::updPosInfo(const State &state) const
-{
-    return Value<PosInfo>::updDowncast(m_Subsystem.updCacheEntry(state, m_PosInfoIx));
-}
-
-bool WrapObstacle::isPointBelowSurface(const State& state, Vec3 point) const
-{
-	const Transform& X_BS = getSurfaceToBaseTransform(state);
-	return m_Surface.getGeometry().calcSurfaceValue(X_BS.shiftBaseStationToFrame(point)) < 0.;
-}
-
-void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo, bool preventLiftOff = false) const
-{
-	// Path oigin and termination points.
-	Vec3 x_O = m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
-	Vec3 x_I = m_TerminationBody.getBodyTransform(s).shiftFrameStationToBase(m_TerminationPoint);
-
-	// Helper for detecting if start/end points lie inside the surfacce.
-	std::function<void(Vec3, const WrapObstacle&, Vec3)> DetectInsideSurfaceError =
-		[&](Vec3 x_O, const WrapObstacle& obstacle, Vec3 x_I) { // TODO also supply the status.
-			// Check that previous point does not lie inside the surface.
-			if (obstacle.isPointBelowSurface(s, x_O)) {
-				throw std::runtime_error("Start point lies inside the surface");
-			}
-
-			// Check that next point does not lie inside the surface.
-			if (obstacle.isPointBelowSurface(s, x_I)) {
-				throw std::runtime_error("End point lies inside the surface");
-			}
-
-			if (preventLiftOff) {
-				return;
-			}
-
-			// TODO detect touhdown
-			// TODO detect liftoff
-			throw std::runtime_error("NOTYETIMPLEMENTED");
-		};
-
-    for (posInfo.loopIter = 0; posInfo.loopIter < m_MaxIter; ++posInfo.loopIter) {
-
-        // Detect touchdown & liftoff.
-		// doForEachObjectWithPrevAndNextPoint(UpdateLiftoffAndTouchdown)
-		callCurrentWithPrevAndNext(s, DetectInsideSurfaceError);
-
-        // Compute the line segments.
-        calcLineSegments(s, x_O, x_I, m_Obstacles, posInfo.lines);
-
-        calcPathError(s, m_Obstacles, posInfo.lines, posInfo.pathError);
-
-        const Real maxPathError = posInfo.pathError.normInf();
-
-        // Evaluate path error, and stop when converged.
-        if (maxPathError < m_PathErrorBound) {
-            return;
-        }
-
-        // Evaluate the path error jacobian.
-        calcPathErrorJacobian(s, m_Obstacles, posInfo.lines, posInfo.pathErrorJacobian);
-
-        // Compute path corrections.
-        calcPathCorrections(s, m_Obstacles, posInfo.pathError, posInfo.pathErrorJacobian, posInfo.pathMatrix, posInfo.pathCorrections);
-
-        // Apply path corrections.
-		throw std::runtime_error("NOTYETIMPLEMENTED");
-		const Correction* corrIt = nullptr; // TODO
-        for (const WrapObstacle& obstacle : m_Obstacles) {
-            if (!obstacle.isActive(s)) {
-                continue;
-            }
-            obstacle.applyGeodesicCorrection(s, *corrIt);
-            ++corrIt;
-        }
-    }
-
-	throw std::runtime_error("Failed to converge");
-}

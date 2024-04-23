@@ -283,20 +283,61 @@ class WrappingPath::Impl {
 
         void calcInitZeroLengthGeodesic(State& state, std::function<Vec3(size_t)> GetInitPointGuess) const;
 
-        WrapObstacle* findPrevActiveObstacle(const State& s, size_t obsIdx);
-        WrapObstacle* findNextActiveObstacle(const State& s, size_t obsIdx);
-
-        void callCurrentWithPrevAndNext(
-                const State& s,
-                std::function<void(size_t prevActiveIdx, size_t currentIdx, size_t nextActiveIdx)> f);
-
-        void callCurrentWithPrevAndNext(
-                const State& s,
-                std::function<void(Vec3 x_O, const WrapObstacle& o, Vec3 x_I)> f) const;
 
     private:
         PosInfo& updPosInfo(const State& s) const;
         void calcPosInfo(const State& s, PosInfo& posInfo) const;
+
+        static Vec3 FindPrevPoint(
+                const State& state,
+                const Vec3& originPoint,
+                const std::vector<WrapObstacle>& obs,
+                size_t idx);
+
+        static Vec3 FindNextPoint(
+                const State& state,
+                const Vec3& terminationPoint,
+                const std::vector<WrapObstacle>& obs,
+                size_t idx);
+
+        WrapObstacle* findPrevActiveObstacle(const State& s, size_t obsIdx);
+        WrapObstacle* findNextActiveObstacle(const State& s, size_t obsIdx);
+
+        template<size_t N>
+            static void calcPathErrorVector(
+                    const State& state,
+                    const std::vector<WrapObstacle>& obs,
+                    const std::vector<LineSegment>& lines,
+                    std::array<CoordinateAxis, N> axes,
+                    Vector& pathError);
+
+        template<size_t N>
+            static void calcPathErrorJacobian(
+                    const State& state,
+                    const std::vector<WrapObstacle>& obs,
+                    const std::vector<LineSegment>& lines,
+                    std::array<CoordinateAxis, N> axes,
+                    Matrix& J);
+
+        static void calcLineSegments(
+                const State& s,
+                Vec3 p_O,
+                Vec3 p_I,
+                const std::vector<WrapObstacle>& obs,
+                std::vector<LineSegment>& lines);
+
+        static size_t CalcUpdatedObstaclePosInfo(
+                const State& s,
+                const Vec3& x_O,
+                const Vec3& x_I,
+                const std::vector<WrapObstacle>& obs,
+                size_t maxIter,
+                Real eps);
+
+static double calcPathLength(
+	const State& state,
+    const std::vector<WrapObstacle>& obs,
+    const std::vector<LineSegment>& lines);
 
         WrappingPathSubsystem m_Subsystem;
 
@@ -309,7 +350,9 @@ class WrappingPath::Impl {
         std::vector<WrapObstacle> m_Obstacles {};
 
         Real m_PathErrorBound = 0.1;
-        size_t m_MaxIter = 10;
+        Real m_ObsErrorBound = 0.1;
+        size_t m_PathMaxIter = 10;
+        size_t m_ObsMaxIter = 10;
 
         // TOPOLOGY CACHE (set during realizeTopology())
         CacheEntryIndex       m_PosInfoIx;
