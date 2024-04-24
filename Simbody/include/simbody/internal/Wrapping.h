@@ -62,8 +62,8 @@ public:
     void setDisabled(const State& state) const;
     void setEnabled(const State& state) const;
 
-    int calcPathPoints(const State& state, std::vector<Vec3>& points);
-    int calcPathFrenetFrames(
+    int calcSegmentPoints(const State& state, std::vector<Vec3>& points);
+    int calcSegmentFrenetFrames(
         const State& state,
         std::vector<ContactGeometry::FrenetFrame>& frames);
 
