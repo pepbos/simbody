@@ -222,6 +222,28 @@ class WrapObstacle::Impl
     void applyGeodesicCorrection(const State& state, const ContactGeometry::GeodesicCorrection& c) const;
     size_t calcPathPoints(const State& state, std::vector<Vec3>& points) const;
 
+    /* const MobilizedBody& getMobilizedBody() const {return m_Mobod;} */
+    void calcContactPointVelocitiesInGround(const State& s, Vec3& v_GP, Vec3& v_GQ) const
+    {
+        // TODO use builtin?
+        /* v_GP = m_Mobod.findStationVelocityInGround(state, P_B); */
+
+        // Get body kinematics in ground frame.
+        const Vec3 x_BG = m_Mobod.getBodyOriginLocation(s);
+        const Vec3& w_BG = m_Mobod.getBodyAngularVelocity(s);
+        const Vec3& v_BG = m_Mobod.getBodyOriginVelocity(s);
+
+        const PosInfo& pos = getPosInfo(s);
+
+        // Relative contact point positions to body origin, expressed in ground frame.
+        Vec3 r_P = pos.KP.p() - x_BG;
+        Vec3 r_Q = pos.KQ.p() - x_BG;
+
+        // Compute contact point velocities in ground frame.
+        v_GP = v_BG + w_BG % r_P;
+        v_GQ = v_BG + w_BG % r_Q;
+    }
+
     // TODO allow for user to shoot his own geodesic.
     /* void calcGeodesic(State& state, Vec3 x, Vec3 t, Real l) const; */
 
@@ -270,37 +292,38 @@ class WrappingPath::Impl {
 
             Real l = NaN;
 
-            std::vector<LineSegment> lines;
-
-            Vector pathError {};
-            Matrix pathMatrix {};
-            Matrix pathErrorJacobian {};
-            Vector pathCorrections {};
-
             size_t loopIter = 0;
 
-            // TODO solver matrices
+            // TODO no matrices here?
         };
 
-        std::vector<WrapObstacle>& updObstacles() {return m_Obstacles;}
-        const std::vector<WrapObstacle>& getObstacles() const {return m_Obstacles;}
+        struct VelInfo
+        {
+            Real lengthDot = NaN;
+        };
+
+        /*         std::vector<WrapObstacle>& updObstacles() {return m_Obstacles;} */
+        /*         const std::vector<WrapObstacle>& getObstacles() const {return m_Obstacles;} */
 
         // Allocate state variables and cache entries.
         void realizeTopology(State& state);
         void realizePosition(const State& state) const;
         void realizeVelocity(const State& state) const;
-        void realizeAcceleration(const State& state) const;
         void invalidateTopology()
         {   m_Subsystem.invalidateSubsystemTopologyCache(); }
 
         const PosInfo& getPosInfo(const State& state) const;
+        const VelInfo& getVelInfo(const State& state) const;
 
-        void calcInitZeroLengthGeodesic(State& state, std::function<Vec3(size_t)> GetInitPointGuess) const;
+        void calcInitZeroLengthGeodesic(State& s) const;
 
 
     private:
         PosInfo& updPosInfo(const State& s) const;
+        VelInfo& updVelInfo(const State& state) const;
+
         void calcPosInfo(const State& s, PosInfo& posInfo) const;
+        void calcVelInfo(const State& s, VelInfo& velInfo) const;
 
         size_t countActive(const State& s) const;
 
@@ -343,27 +366,19 @@ class WrappingPath::Impl {
                     std::array<CoordinateAxis, N> axes,
                     Matrix& J);
 
-        static void calcLineSegments(
+        // Make static or not?
+        void calcLineSegments(
                 const State& s,
                 Vec3 p_O,
                 Vec3 p_I,
+                std::vector<LineSegment>& lines) const;
+
+        static double calcPathLength(
+                const State& state,
                 const std::vector<WrapObstacle>& obs,
-                std::vector<LineSegment>& lines);
+                const std::vector<LineSegment>& lines);
 
-        static size_t CalcUpdatedObstaclePosInfo(
-                const State& s,
-                const Vec3& x_O,
-                const Vec3& x_I,
-                const std::vector<WrapObstacle>& obs,
-                size_t maxIter,
-                Real eps);
-
-static double calcPathLength(
-	const State& state,
-    const std::vector<WrapObstacle>& obs,
-    const std::vector<LineSegment>& lines);
-
-const WrappingPathSubsystem& getSubsystem() const {return m_Subsystem;}
+        const WrappingPathSubsystem& getSubsystem() const {return m_Subsystem;}
 
         WrappingPathSubsystem m_Subsystem;
 
