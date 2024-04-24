@@ -315,6 +315,7 @@ void Surface::calcStatus(const Vec3& prev_QS, const Vec3& next_PS, CacheEntry& c
 
 CurveSegment::Impl::Impl(
             CableSpan path,
+            CurveSegmentIndex ix,
             const MobilizedBody& mobod,
             const Transform& X_BS,
             ContactGeometry geometry,
@@ -323,12 +324,11 @@ CurveSegment::Impl::Impl(
     :
         m_Subsystem(path.getImpl().getSubsystem()),
         m_Path(path),
+        m_Index(ix),
         m_Mobod(mobod),
         m_Offset(X_BS),
         m_Surface(m_Subsystem, geometry, initPointGuess)
-{
-    throw std::runtime_error("NOTYETIMPLEMENTED: Must adopt to path, and give the index");
-}
+{}
 
 void CurveSegment::Impl::realizeTopology(State &s)
 {
@@ -391,8 +391,8 @@ void CurveSegment::Impl::calcPosInfo(
 	const Transform& X_GS = posInfo.X_GS = m_Mobod.getBodyTransform(s).compose(m_Offset);
 
     // Get the path points before and after this segment.
-    const Vec3 prev_G = m_Path.getImpl().findPrevPoint(s, m_PathSegmentIx);
-    const Vec3 next_G = m_Path.getImpl().findNextPoint(s, m_PathSegmentIx);
+    const Vec3 prev_G = m_Path.getImpl().findPrevPoint(s, m_Index);
+    const Vec3 next_G = m_Path.getImpl().findNextPoint(s, m_Index);
 
     // Transform the prev and next path points to the surface frame.
     const Vec3 prev_S = X_GS.shiftBaseStationToFrame(prev_G);
@@ -433,34 +433,6 @@ void CurveSegment::Impl::calcPosInfo(
 
 namespace
 {
-
-const CurveSegment* FindPrevActiveObstacle(
-	const State& s,
-    const std::vector<CurveSegment>& obs,
-    size_t idx)
-{
-    for (ptrdiff_t i = idx - 1; i > 0; --i) {
-        // Find the active segment before the current.
-        if (obs.at(i).isActive(s)) {
-            return &obs.at(i);
-        }
-    }
-    return nullptr;
-}
-
-const CurveSegment* FindNextActiveObstacle(
-	const State& s,
-    const std::vector<CurveSegment>& obs,
-    size_t idx)
-{
-    // Find the active segment after the current.
-    for (ptrdiff_t i = idx + 1; i < obs.size(); ++i) {
-        if (obs.at(i).isActive(s)) {
-            return &obs.at(i);
-        }
-    }
-    return nullptr;
-}
 
 static const int N_PATH_CONSTRAINTS = 4;
 
@@ -567,23 +539,69 @@ void CableSpan::Impl::calcInitZeroLengthGeodesic(State& s) const
 	}
 }
 
+const CurveSegment* CableSpan::Impl::findPrevActiveCurveSegment(
+	const State& s,
+    CurveSegmentIndex ix) const
+{
+    for (int i = ix - 1; i > 0; --i) {
+        // Find the active segment before the current.
+        if (m_CurveSegments.at(CurveSegmentIndex(i)).getImpl().isActive(s)) {
+            return &m_CurveSegments.at(CurveSegmentIndex(i));
+        }
+    }
+    return nullptr;
+}
+
+const CurveSegment* CableSpan::Impl::findNextActiveCurveSegment(
+	const State& s,
+    CurveSegmentIndex ix) const
+{
+    // Find the active segment after the current.
+    for (int i = ix + 1; i < m_CurveSegments.size(); ++i) {
+        if (m_CurveSegments.at(CurveSegmentIndex(i)).getImpl().isActive(s)) {
+            return &m_CurveSegments.at(CurveSegmentIndex(i));
+        }
+    }
+    return nullptr;
+}
+
+Vec3 CableSpan::Impl::findPrevPoint(
+	const State& s,
+    CurveSegmentIndex ix) const
+{
+    const CurveSegment* segment = findPrevActiveCurveSegment(s, ix);
+    return segment
+        ? segment->getImpl().getPosInfo(s).KQ.p()
+        : m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
+}
+
+Vec3 CableSpan::Impl::findNextPoint(
+	const State& s,
+    CurveSegmentIndex ix) const
+{
+    const CurveSegment* segment = findNextActiveCurveSegment(s, ix);
+    return segment
+        ? segment->getImpl().getPosInfo(s).KP.p()
+        : m_TerminationBody.getBodyTransform(s).shiftFrameStationToBase(m_TerminationPoint);
+}
+
 template<size_t N>
 void CableSpan::Impl::calcPathErrorVector(
 	const State& s,
-    const std::vector<CurveSegment>& obs,
     const std::vector<LineSegment>& lines,
     std::array<CoordinateAxis, N> axes,
-    Vector& pathError)
+    Vector& pathError) const
 {
     size_t lineIx = 0;
     ptrdiff_t row  = -1;
 
-    for (const CurveSegment& o : obs) {
-        if (!o.getImpl().isActive(s)) {
+    for (int i = 0; i < getNumCurveSegments(); ++i) {
+        const CurveSegment& segment = getCurveSegment(CurveSegmentIndex(i));
+        if (!segment.getImpl().isActive(s)) {
             continue;
         }
 
-        const GeodesicInfo& g = o.getImpl().getPosInfo(s);
+        const GeodesicInfo& g = segment.getImpl().getPosInfo(s);
         for (CoordinateAxis axis: axes) {
             pathError(++row)  = calcPathError(lines.at(lineIx), g.KP.R(), axis);
         }
@@ -597,32 +615,33 @@ void CableSpan::Impl::calcPathErrorVector(
 template<size_t N>
 void CableSpan::Impl::calcPathErrorJacobian(
 	const State& s,
-    const std::vector<CurveSegment>& obs,
     const std::vector<LineSegment>& lines,
     std::array<CoordinateAxis, N> axes,
-    Matrix& J)
+    Matrix& J) const
 {
     constexpr size_t Nq = GeodesicDOF;
 
     // TODO perhaps just not make method static.
-    const size_t n     = lines.size() - 1;
+    const size_t n = lines.size() - 1;
 
     SimTK_ASSERT(J.rows() == n * N, "Invalid number of rows in jacobian matrix");
     SimTK_ASSERT(J.cols() == n * Nq, "Invalid number of columns in jacobian matrix");
 
     size_t row = 0;
     size_t col = 0;
-    for (size_t i = 0; i < n; ++i) {
-        if (!obs.at(i).getImpl().isActive(s)) {
+    size_t activeIx = 0;
+    for (const CurveSegment& segment : m_CurveSegments) {
+        if (!segment.getImpl().isActive(s)) {
             continue;
         }
-        const GeodesicInfo& g = obs.at(i).getImpl().getPosInfo(s);
+        const GeodesicInfo& g = segment.getImpl().getPosInfo(s);
 
-        const LineSegment& l_P = lines.at(i);
-        const LineSegment& l_Q = lines.at(i + 1);
+        const LineSegment& l_P = lines.at(activeIx);
+        const LineSegment& l_Q = lines.at(activeIx + 1);
 
-        const CurveSegment* prev = FindPrevActiveObstacle(s, obs, i);
-        const CurveSegment* next = FindNextActiveObstacle(s, obs, i);
+        const CurveSegmentIndex ix = segment.getImpl().getIndex();
+        const CurveSegment* prev = findPrevActiveCurveSegment(s, ix);
+        const CurveSegment* next = findNextActiveCurveSegment(s, ix);
 
         for (CoordinateAxis axis: axes) {
             const UnitVec3 a_P = g.KP.R().getAxisUnitVec(axis);
@@ -656,8 +675,7 @@ void CableSpan::Impl::calcPathErrorJacobian(
 
 double CableSpan::Impl::calcPathLength(
 	const State& s,
-    const std::vector<CurveSegment>& obs,
-    const std::vector<LineSegment>& lines)
+    const std::vector<LineSegment>& lines) const
 {
     double lTot = 0.;
     for (const LineSegment& line : lines) {
@@ -665,12 +683,12 @@ double CableSpan::Impl::calcPathLength(
         lTot += line.l;
     }
 
-    for (const CurveSegment& obstacle : obs) {
-        if (!obstacle.getImpl().isActive(s))
+    for (const CurveSegment& segment : m_CurveSegments) {
+        if (!segment.getImpl().isActive(s))
 		{
             continue;
 		}
-        lTot += obstacle.getImpl().getPosInfo(s).length;
+        lTot += segment.getImpl().getPosInfo(s).length;
     }
     return lTot;
 }
@@ -685,12 +703,12 @@ void CableSpan::Impl::calcLineSegments(
     lines.clear();
 
     Vec3 lineStart = std::move(p_O);
-    for (const CurveSegment& o : m_CurveSegments) {
-        if (!o.getImpl().isActive(s)) {
+    for (const CurveSegment& segment : m_CurveSegments) {
+        if (!segment.getImpl().isActive(s)) {
             continue;
         }
 
-        const GeodesicInfo& g = o.getImpl().getPosInfo(s);
+        const GeodesicInfo& g = segment.getImpl().getPosInfo(s);
         const Vec3 lineEnd = g.KP.p();
         lines.emplace_back(lineStart, lineEnd);
 
@@ -699,31 +717,11 @@ void CableSpan::Impl::calcLineSegments(
     lines.emplace_back(lineStart, p_I);
 }
 
-Vec3 CableSpan::Impl::FindPrevPoint(
-        const State& s,
-        const Vec3& originPoint,
-    const std::vector<CurveSegment>& obs,
-    size_t idx)
-{
-    const CurveSegment* prev = FindPrevActiveObstacle(s, obs, idx);
-    return prev ? prev->getImpl().getPosInfo(s).KQ.p() : originPoint;
-}
-
-Vec3 CableSpan::Impl::FindNextPoint(
-        const State& s,
-        const Vec3& terminationPoint,
-    const std::vector<CurveSegment>& obs,
-    size_t idx)
-{
-    const CurveSegment* next = FindNextActiveObstacle(s, obs, idx);
-    return next ? next->getImpl().getPosInfo(s).KP.p() : terminationPoint;
-}
-
 size_t CableSpan::Impl::countActive(const State& s) const
 {
     size_t count = 0;
-    for (const CurveSegment& o : m_CurveSegments) {
-        if (o.getImpl().isActive(s)) {
+    for (const CurveSegment& segment : m_CurveSegments) {
+        if (segment.getImpl().isActive(s)) {
             ++count;
         }
     }
@@ -750,14 +748,14 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         calcLineSegments(s, x_O, x_I, data.lineSegments);
 
         // Evaluate path error, and stop when converged.
-        calcPathErrorVector<2>(s, m_CurveSegments, data.lineSegments, axes, data.pathError);
+        calcPathErrorVector<2>(s, data.lineSegments, axes, data.pathError);
         const Real maxPathError = data.pathError.normInf();
         if (maxPathError < m_PathErrorBound) {
             return;
         }
 
         // Evaluate the path error jacobian.
-        calcPathErrorJacobian<2>(s, m_CurveSegments, data.lineSegments, axes, data.pathErrorJacobian);
+        calcPathErrorJacobian<2>(s, data.lineSegments, axes, data.pathErrorJacobian);
 
         // Compute path corrections.
 		const Correction* corrIt = calcPathCorrections(data);
@@ -810,9 +808,16 @@ void CableSpan::Impl::calcVelInfo(const State& s, VelInfo& velInfo) const
     }
 
     const Vec3 v_GP = m_TerminationBody.findStationVelocityInGround(s, m_TerminationPoint);
-    const UnitVec3 e_G = lastActive? lastActive->getImpl().getPosInfo(s).KQ.R().getAxisUnitVec(TangentAxis) : UnitVec3(pos.xO - pos.xI);
+    const UnitVec3 e_G = lastActive? lastActive->getImpl().getPosInfo(s).KQ.R().getAxisUnitVec(TangentAxis) : UnitVec3(pos.xI - pos.xO);
 
     lengthDot += dot(e_G, v_GP - v_GQ);
+}
+void CableSpan::Impl::applyBodyForces(
+        const State& state,
+        Real tension,
+        Vector_<SpatialVec>& bodyForcesInG) const
+{
+    throw std::runtime_error("NOTYETIMPLEMENTED");
 }
 
 //==============================================================================

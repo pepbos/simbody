@@ -38,7 +38,6 @@ public:
     ~CurveSegment()                                = default;
 
     CurveSegment(const MobilizedBody& mobod, Transform X_BS, const ContactGeometry& geometry, Vec3 xHint);
-    /* bool isActive(const State& state) const; */
 
     class Impl;
 
@@ -48,6 +47,19 @@ public:
         Liftoff,
         Disabled,
     };
+
+    Real getSegmentLength(const State& s);
+    /* { */
+    /*     getImpl().getSubsystem().realizePosition(s); */
+    /*     return getImpl().getLength(s); */
+    /* } */
+
+    Status getStatus(const State& state) const;
+    void setDisabled(const State& state) const;
+    void setEnabled(const State& state) const;
+
+    int calcPathPoints(const State& state, std::vector<Vec3>& points);
+    int calcPathFrenetFrames(const State& state, std::vector<ContactGeometry::FrenetFrame>& frames);
 
 private:
     explicit CurveSegment(std::unique_ptr<Impl> impl);
@@ -85,6 +97,14 @@ public:
 
     Real getLength(const State& state) const;
     Real getLengthDot(const State& state) const;
+
+    void applyBodyForces(
+            const State& state,
+            Real tension,
+            Vector_<SpatialVec>& bodyForcesInG) const;
+
+    int calcPathPoints(const State& state, std::vector<Vec3>& points);
+    int calcPathFrenetFrames(const State& state, std::vector<ContactGeometry::FrenetFrame>& frames);
 
     class Impl;
 private:

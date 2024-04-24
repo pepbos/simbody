@@ -38,6 +38,7 @@ class CurveSegment::Impl
 
     Impl(
             CableSpan cable,
+            CurveSegmentIndex ix,
             const MobilizedBody& mobod,
             const Transform& X_BS,
             ContactGeometry geometry,
@@ -199,6 +200,10 @@ class CurveSegment::Impl
 
         Real length = NaN;
 
+        // TODO add force & moment here?
+        /* Vec3 unitForce {}; */
+        /* Vec3 unitMoment {}; */
+
         Status status = Status::Ok;
     };
 
@@ -214,6 +219,9 @@ class CurveSegment::Impl
     {
         m_Subsystem.markCacheValueNotRealized(state, m_PosInfoIx);
     }
+
+    CurveSegmentIndex getIndex() const {return m_Index;}
+    void setIndex(CurveSegmentIndex ix) {m_Index = ix;}
 
     const PosInfo& getPosInfo(const State& s) const {
         realizePosition(s);
@@ -262,7 +270,7 @@ class CurveSegment::Impl
     // TODO Required for accessing the cache variable?
     CableSubsystem m_Subsystem; // The subsystem this segment belongs to.
     CableSpan m_Path; // The path this segment belongs to.
-    CurveSegmentIndex m_PathSegmentIx; // The index in its path.
+    CurveSegmentIndex m_Index; // The index in its path.
 
     MobilizedBody m_Mobod;
     Transform m_Offset;
@@ -294,6 +302,17 @@ class CableSpan::Impl {
             m_TerminationBody(terminationBody),
             m_TerminationPoint(terminationPoint) {}
 
+        int getNumCurveSegments() const {return m_CurveSegments.size();}
+
+        const CurveSegment& getCurveSegment(CurveSegmentIndex ix) const
+        {   return m_CurveSegments[ix]; }
+
+        CurveSegmentIndex adoptObstacle(CurveSegment& segment) 
+        {
+            m_CurveSegments.push_back(segment);
+            return CurveSegmentIndex(m_CurveSegments.size()-1);
+        }
+
         // Position level cache entry.
         struct PosInfo
         {
@@ -303,8 +322,6 @@ class CableSpan::Impl {
             Real l = NaN;
 
             size_t loopIter = 0;
-
-            // TODO no matrices here?
         };
 
         // Velocity level cache entry.
@@ -325,6 +342,10 @@ class CableSpan::Impl {
 
         void calcInitZeroLengthGeodesic(State& s) const;
 
+        void applyBodyForces(
+                const State& state,
+                Real tension,
+                Vector_<SpatialVec>& bodyForcesInG) const;
 
     private:
         PosInfo& updPosInfo(const State& s) const;
@@ -337,42 +358,28 @@ class CableSpan::Impl {
 
         Vec3 findPrevPoint(
                 const State& state,
-                CurveSegmentIndex idx) const;
+                CurveSegmentIndex ix) const;
 
         Vec3 findNextPoint(
                 const State& state,
-                CurveSegmentIndex idx) const;
+                CurveSegmentIndex ix) const;
 
-        static Vec3 FindPrevPoint(
-                const State& state,
-                const Vec3& originPoint,
-                const std::vector<CurveSegment>& obs,
-                size_t idx);
-
-        static Vec3 FindNextPoint(
-                const State& state,
-                const Vec3& terminationPoint,
-                const std::vector<CurveSegment>& obs,
-                size_t idx);
-
-        CurveSegment* findPrevActiveCurveSegment(const State& s, size_t obsIdx);
-        CurveSegment* findNextActiveCurveSegment(const State& s, size_t obsIdx);
+        const CurveSegment* findPrevActiveCurveSegment(const State& s, CurveSegmentIndex ix) const;
+        const CurveSegment* findNextActiveCurveSegment(const State& s, CurveSegmentIndex ix) const;
 
         template<size_t N>
-            static void calcPathErrorVector(
+            void calcPathErrorVector(
                     const State& state,
-                    const std::vector<CurveSegment>& obs,
                     const std::vector<LineSegment>& lines,
                     std::array<CoordinateAxis, N> axes,
-                    Vector& pathError);
+                    Vector& pathError) const;
 
         template<size_t N>
-            static void calcPathErrorJacobian(
+            void calcPathErrorJacobian(
                     const State& state,
-                    const std::vector<CurveSegment>& obs,
                     const std::vector<LineSegment>& lines,
                     std::array<CoordinateAxis, N> axes,
-                    Matrix& J);
+                    Matrix& J) const;
 
         // Make static or not?
         void calcLineSegments(
@@ -381,10 +388,9 @@ class CableSpan::Impl {
                 Vec3 p_I,
                 std::vector<LineSegment>& lines) const;
 
-        static double calcPathLength(
+        double calcPathLength(
                 const State& state,
-                const std::vector<CurveSegment>& obs,
-                const std::vector<LineSegment>& lines);
+                const std::vector<LineSegment>& lines) const;
 
         const CableSubsystem& getSubsystem() const {return m_Subsystem;}
 
@@ -397,7 +403,7 @@ class CableSpan::Impl {
         MobilizedBody m_TerminationBody;
         Vec3 m_TerminationPoint;
 
-        std::vector<CurveSegment> m_CurveSegments {};
+        Array_<CurveSegment, CurveSegmentIndex> m_CurveSegments {};
 
         Real m_PathErrorBound = 0.1;
         Real m_ObsErrorBound = 0.1;
