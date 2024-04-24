@@ -16,13 +16,13 @@
 namespace SimTK
 {
 
-SimTK_DEFINE_UNIQUE_INDEX_TYPE(PathSegmentIndex);
+SimTK_DEFINE_UNIQUE_INDEX_TYPE(CurveSegmentIndex);
 SimTK_DEFINE_UNIQUE_INDEX_TYPE(PathIndex);
 
 //==============================================================================
-//                                OBSTACLE IMPL
+//                                ??? IMPL
 //==============================================================================
-class WrapObstacle::Impl
+class CurveSegment::Impl
 {
     using FrenetFrame = ContactGeometry::FrenetFrame;
     using Variation = ContactGeometry::GeodesicVariation;
@@ -37,13 +37,15 @@ class WrapObstacle::Impl
     ~Impl()                                     = default;
 
     Impl(
-            WrappingPath path,
+            CableSpan cable,
             const MobilizedBody& mobod,
             const Transform& X_BS,
             ContactGeometry geometry,
             Vec3 initPointGuess
         );
 
+    // The status of this curve segment in relation to the surface it wraps
+    // over.
     enum class Status
     {
         Ok,
@@ -52,28 +54,28 @@ class WrapObstacle::Impl
     };
 
     //==============================================================================
-    //                      SURFACE
+    //                      ???
     //==============================================================================
     // Represents the local surface wrapping problem.
     // Caches last computed geodesic as a warmstart.
     // Not exposed outside of simbody.
-    // Not shared amongst different paths or obstacles.
-    class Surface
+    // Not shared amongst different paths/spans or obstacles/CurveSegments.
+    class LocalGeodesic
     {
         using FrenetFrame = ContactGeometry::FrenetFrame;
         using Variation = ContactGeometry::GeodesicVariation;
         using Correction = ContactGeometry::GeodesicCorrection;
 
         public:
-        Surface()                              = default;
-        ~Surface() = default;
-        Surface(Surface&&) noexcept            = default;
-        Surface& operator=(Surface&&) noexcept = default;
-        Surface(const Surface&)                = delete;
-        Surface& operator=(const Surface&)     = delete;
+        LocalGeodesic()                              = default;
+        ~LocalGeodesic() = default;
+        LocalGeodesic(LocalGeodesic&&) noexcept            = default;
+        LocalGeodesic& operator=(LocalGeodesic&&) noexcept = default;
+        LocalGeodesic(const LocalGeodesic&)                = delete;
+        LocalGeodesic& operator=(const LocalGeodesic&)     = delete;
 
-        Surface(
-                WrappingPathSubsystem subsystem,
+        LocalGeodesic(
+                CableSubsystem subsystem,
                 ContactGeometry geometry,
                 Vec3 initPointGuess
                ) : 
@@ -86,6 +88,7 @@ class WrapObstacle::Impl
         void realizeTopology(State& state);
         void realizePosition(const State& state) const;
 
+        // Some info that can be retrieved from cache.
         struct LocalGeodesicInfo
         {
             FrenetFrame KP {};
@@ -99,6 +102,7 @@ class WrapObstacle::Impl
             Status status = Status::Ok;
         };
 
+        // Helper struct: Required data for shooting a new geodesic.
         struct GeodesicInitialConditions
         {
             private:
@@ -116,13 +120,11 @@ class WrapObstacle::Impl
         };
 
         const LocalGeodesicInfo& calcInitialGeodesic(State& s, const GeodesicInitialConditions& g0) const;
-        // TODO weird name...
-        const LocalGeodesicInfo& calcLocalGeodesic(const State& s, Vec3 prev_QS, Vec3 next_PS) const;
+        const LocalGeodesicInfo& calcLocalGeodesic(const State& s, Vec3 prev_QS, Vec3 next_PS) const; // TODO weird name
         void applyGeodesicCorrection(const State& s, const Correction& c) const;
-
-        // 4. calcPathPoints
         size_t calcPathPoints(const State& state, std::vector<Vec3>& points) const;
 
+        // The user defined point that controls the initial wrapping path.
         void setInitialPointGuess(Vec3 initPointGuess) {m_InitPointGuess = initPointGuess;}
         Vec3 getInitialPointGuess() const {return m_InitPointGuess;}
 
@@ -130,10 +132,13 @@ class WrapObstacle::Impl
 
         private:
 
+        // The cache entry: Curve in local surface coordinated.
+        // This is an auto update discrete cache variable, which makes it persist over integration steps.
+        // TODO or should it be "normal" discrete?
         struct CacheEntry : LocalGeodesicInfo
         {
             Vec3 trackingPointOnLine {NaN, NaN, NaN};
-            std::vector<Vec3> points {};
+            std::vector<Vec3> points {}; // Empty for analytic geoemetry with no allocation overhead.
             double sHint = NaN;
         };
 
@@ -169,7 +174,7 @@ class WrapObstacle::Impl
         void calcGeodesic(const GeodesicInitialConditions& g0, CacheEntry& cache) const;
 
         //------------------------------------------------------------------------------
-        WrappingPathSubsystem m_Subsystem;
+        CableSubsystem m_Subsystem;
 
         ContactGeometry m_Geometry;
 
@@ -181,7 +186,7 @@ class WrapObstacle::Impl
         DiscreteVariableIndex m_CacheIx;
     };
 
-    // Ground frame solution.
+    // Position level cache: Curve in ground frame.
     struct PosInfo
     {
         Transform X_GS {};
@@ -229,7 +234,7 @@ class WrapObstacle::Impl
         /* v_GP = m_Mobod.findStationVelocityInGround(state, P_B); */
 
         // Get body kinematics in ground frame.
-        const Vec3 x_BG = m_Mobod.getBodyOriginLocation(s);
+        const Vec3& x_BG = m_Mobod.getBodyOriginLocation(s);
         const Vec3& w_BG = m_Mobod.getBodyAngularVelocity(s);
         const Vec3& v_BG = m_Mobod.getBodyOriginVelocity(s);
 
@@ -255,14 +260,14 @@ class WrapObstacle::Impl
     void calcPosInfo(const State& state, PosInfo& posInfo) const;
 
     // TODO Required for accessing the cache variable?
-    WrappingPathSubsystem m_Subsystem; // The subsystem this segment belongs to.
-    WrappingPath m_Path; // The path this segment belongs to.
-    PathSegmentIndex m_PathSegmentIx; // The index in its path.
+    CableSubsystem m_Subsystem; // The subsystem this segment belongs to.
+    CableSpan m_Path; // The path this segment belongs to.
+    CurveSegmentIndex m_PathSegmentIx; // The index in its path.
 
     MobilizedBody m_Mobod;
     Transform m_Offset;
 
-    Surface m_Surface;
+    LocalGeodesic m_Surface;
 
     // TOPOLOGY CACHE
     CacheEntryIndex       m_PosInfoIx;
@@ -271,10 +276,14 @@ class WrapObstacle::Impl
 //==============================================================================
 //                         PATH :: IMPL
 //==============================================================================
-class WrappingPath::Impl {
+// TODO
+// - handout CurveSegment index
+// - add other cache variables: velocity, acceleration, force
+// - names: isValid, ContactStationOnBody, Entry (not info/cache)
+class CableSpan::Impl {
     public:
         Impl(
-                WrappingPathSubsystem subsystem,
+                CableSubsystem subsystem,
                 MobilizedBody originBody,
                 Vec3 originPoint,
                 MobilizedBody terminationBody,
@@ -285,6 +294,7 @@ class WrappingPath::Impl {
             m_TerminationBody(terminationBody),
             m_TerminationPoint(terminationPoint) {}
 
+        // Position level cache entry.
         struct PosInfo
         {
             Vec3 xO {NaN, NaN, NaN};
@@ -297,13 +307,11 @@ class WrappingPath::Impl {
             // TODO no matrices here?
         };
 
+        // Velocity level cache entry.
         struct VelInfo
         {
             Real lengthDot = NaN;
         };
-
-        /*         std::vector<WrapObstacle>& updObstacles() {return m_Obstacles;} */
-        /*         const std::vector<WrapObstacle>& getObstacles() const {return m_Obstacles;} */
 
         // Allocate state variables and cache entries.
         void realizeTopology(State& state);
@@ -329,31 +337,31 @@ class WrappingPath::Impl {
 
         Vec3 findPrevPoint(
                 const State& state,
-                PathSegmentIndex idx) const;
+                CurveSegmentIndex idx) const;
 
         Vec3 findNextPoint(
                 const State& state,
-                PathSegmentIndex idx) const;
+                CurveSegmentIndex idx) const;
 
         static Vec3 FindPrevPoint(
                 const State& state,
                 const Vec3& originPoint,
-                const std::vector<WrapObstacle>& obs,
+                const std::vector<CurveSegment>& obs,
                 size_t idx);
 
         static Vec3 FindNextPoint(
                 const State& state,
                 const Vec3& terminationPoint,
-                const std::vector<WrapObstacle>& obs,
+                const std::vector<CurveSegment>& obs,
                 size_t idx);
 
-        WrapObstacle* findPrevActiveObstacle(const State& s, size_t obsIdx);
-        WrapObstacle* findNextActiveObstacle(const State& s, size_t obsIdx);
+        CurveSegment* findPrevActiveCurveSegment(const State& s, size_t obsIdx);
+        CurveSegment* findNextActiveCurveSegment(const State& s, size_t obsIdx);
 
         template<size_t N>
             static void calcPathErrorVector(
                     const State& state,
-                    const std::vector<WrapObstacle>& obs,
+                    const std::vector<CurveSegment>& obs,
                     const std::vector<LineSegment>& lines,
                     std::array<CoordinateAxis, N> axes,
                     Vector& pathError);
@@ -361,7 +369,7 @@ class WrappingPath::Impl {
         template<size_t N>
             static void calcPathErrorJacobian(
                     const State& state,
-                    const std::vector<WrapObstacle>& obs,
+                    const std::vector<CurveSegment>& obs,
                     const std::vector<LineSegment>& lines,
                     std::array<CoordinateAxis, N> axes,
                     Matrix& J);
@@ -375,12 +383,13 @@ class WrappingPath::Impl {
 
         static double calcPathLength(
                 const State& state,
-                const std::vector<WrapObstacle>& obs,
+                const std::vector<CurveSegment>& obs,
                 const std::vector<LineSegment>& lines);
 
-        const WrappingPathSubsystem& getSubsystem() const {return m_Subsystem;}
+        const CableSubsystem& getSubsystem() const {return m_Subsystem;}
 
-        WrappingPathSubsystem m_Subsystem;
+        // Reference back to the subsystem.
+        CableSubsystem m_Subsystem;
 
         MobilizedBody m_OriginBody;
         Vec3 m_OriginPoint;
@@ -388,7 +397,7 @@ class WrappingPath::Impl {
         MobilizedBody m_TerminationBody;
         Vec3 m_TerminationPoint;
 
-        std::vector<WrapObstacle> m_Obstacles {};
+        std::vector<CurveSegment> m_CurveSegments {};
 
         Real m_PathErrorBound = 0.1;
         Real m_ObsErrorBound = 0.1;
@@ -398,33 +407,32 @@ class WrappingPath::Impl {
         // TOPOLOGY CACHE (set during realizeTopology())
         CacheEntryIndex       m_PosInfoIx;
         CacheEntryIndex       m_VelInfoIx;
-        CacheEntryIndex       m_VizInfoIx;
 
-        friend WrapObstacle::Impl;
+        friend CurveSegment::Impl;
 };
 
 //==============================================================================
 //                         SUBSYSTEM :: IMPL
 //==============================================================================
-class WrappingPathSubsystem::Impl : public Subsystem::Guts {
+class CableSubsystem::Impl : public Subsystem::Guts {
     public:
         Impl() {}
         ~Impl() {}
         Impl* cloneImpl() const override 
         {   return new Impl(*this); }
 
-        int getNumPaths() const {return paths.size();}
+        int getNumPaths() const {return cables.size();}
 
-        const WrappingPath& getCablePath(WrappingPathIndex index) const 
-        {   return paths[index]; }
+        const CableSpan& getCablePath(WrappingPathIndex index) const 
+        {   return cables[index]; }
 
-        WrappingPath& updCablePath(WrappingPathIndex index) 
-        {   return paths[index]; }
+        CableSpan& updCablePath(WrappingPathIndex index) 
+        {   return cables[index]; }
 
         // Add a cable path to the list, bumping the reference count.
-        WrappingPathIndex adoptCablePath(WrappingPath& path) {
-            paths.push_back(path);
-            return WrappingPathIndex(paths.size()-1);
+        WrappingPathIndex adoptCablePath(CableSpan& path) {
+            cables.push_back(path);
+            return WrappingPathIndex(cables.size()-1);
         }
 
         // Return the MultibodySystem which owns this WrappingPathSubsystem.
@@ -442,8 +450,8 @@ class WrappingPathSubsystem::Impl : public Subsystem::Guts {
             // Topology cache is const.
             Impl* wThis = const_cast<Impl*>(this);
 
-            for (WrappingPathIndex ix(0); ix < paths.size(); ++ix) {
-                WrappingPath& path = wThis->updCablePath(ix);
+            for (WrappingPathIndex ix(0); ix < cables.size(); ++ix) {
+                CableSpan& path = wThis->updCablePath(ix);
                 path.updImpl().realizeTopology(state);
             }
 
@@ -451,26 +459,17 @@ class WrappingPathSubsystem::Impl : public Subsystem::Guts {
         }
 
         int realizeSubsystemPositionImpl(const State& state) const override {
-            for (WrappingPathIndex ix(0); ix < paths.size(); ++ix) {
-                const WrappingPath& path = getCablePath(ix);
+            for (WrappingPathIndex ix(0); ix < cables.size(); ++ix) {
+                const CableSpan& path = getCablePath(ix);
                 path.getImpl().realizePosition(state);
             }
             return 0;
         }
 
         int realizeSubsystemVelocityImpl(const State& state) const override {
-            for (WrappingPathIndex ix(0); ix < paths.size(); ++ix) {
-                const WrappingPath& path = getCablePath(ix);
+            for (WrappingPathIndex ix(0); ix < cables.size(); ++ix) {
+                const CableSpan& path = getCablePath(ix);
                 path.getImpl().realizeVelocity(state);
-            }
-            return 0;
-        }
-
-
-        int realizeSubsystemAccelerationImpl(const State& state) const override {
-            for (WrappingPathIndex ix(0); ix < paths.size(); ++ix) {
-                const WrappingPath& path = getCablePath(ix);
-                path.getImpl().realizeAcceleration(state);
             }
             return 0;
         }
@@ -479,7 +478,7 @@ class WrappingPathSubsystem::Impl : public Subsystem::Guts {
 
     private:
         // TOPOLOGY STATE
-        Array_<WrappingPath, WrappingPathIndex> paths;
+        Array_<CableSpan, WrappingPathIndex> cables;
 };
 
 } // namespace SimTK

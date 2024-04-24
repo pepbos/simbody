@@ -19,27 +19,26 @@ SimTK_DEFINE_UNIQUE_INDEX_TYPE(WrappingPathIndex);
 SimTK_DEFINE_UNIQUE_INDEX_TYPE(WrapObstacleIndex);
 
 class MultibodySystem;
-class WrappingPathSubsystem;
-class WrapObstacle;
-class WrappingPath;
+class CableSubsystem;
+class CurveSegment;
+class CableSpan;
 
 //==============================================================================
-//                                OBSTACLE
+//                                CURVE SEGMENT
 //==============================================================================
-// Although cheap to copy, we cannot hand them out because they have a cache entry associated with them.
-// The surface they hold a pointer to can be reused in the model.
-class SimTK_SIMBODY_EXPORT WrapObstacle
+// The total cable path/span consists of LineSegments and CurveSegments
+class SimTK_SIMBODY_EXPORT CurveSegment
 {
 public:
-    WrapObstacle()                                 = default;
-    WrapObstacle(const WrapObstacle&)              = delete;
-    WrapObstacle& operator = (const WrapObstacle&) = delete;
-    WrapObstacle(WrapObstacle&&) noexcept                  = default;
-    WrapObstacle& operator = (WrapObstacle&&) noexcept     = default;
-    ~WrapObstacle()                                = default;
+    CurveSegment()                                 = default;
+    CurveSegment(const CurveSegment&)              = delete;
+    CurveSegment& operator = (const CurveSegment&) = delete;
+    CurveSegment(CurveSegment&&) noexcept                  = default;
+    CurveSegment& operator = (CurveSegment&&) noexcept     = default;
+    ~CurveSegment()                                = default;
 
-    WrapObstacle(const MobilizedBody& mobod, Transform X_BS, const ContactGeometry& geometry, Vec3 xHint);
-    bool isActive(const State& state) const;
+    CurveSegment(const MobilizedBody& mobod, Transform X_BS, const ContactGeometry& geometry, Vec3 xHint);
+    /* bool isActive(const State& state) const; */
 
     class Impl;
 
@@ -51,9 +50,9 @@ public:
     };
 
 private:
-    explicit WrapObstacle(std::unique_ptr<Impl> impl);
+    explicit CurveSegment(std::unique_ptr<Impl> impl);
 
-    friend WrappingPath;
+    friend CableSpan;
     const Impl& getImpl() const;
     Impl& updImpl();
 
@@ -61,9 +60,10 @@ private:
 };
 
 //==============================================================================
-//                                PATH
+//                          PATH - or SPAN
 //==============================================================================
-class SimTK_SIMBODY_EXPORT WrappingPath
+// Cable, wire, rope, cord
+class SimTK_SIMBODY_EXPORT CableSpan
 {
 public:
         struct LineSegment
@@ -73,50 +73,52 @@ public:
         };
 
 public:
-    WrappingPath(
-        WrappingPathSubsystem& subsystem,
+    CableSpan(
+        CableSubsystem& subsystem,
         const MobilizedBody& originBody,
         const Vec3& defaultOriginPoint,
         const MobilizedBody& terminationBody,
         const Vec3& defaultTerminationPoint);
 
-    std::vector<WrapObstacle>& updObstacles();
-    const std::vector<WrapObstacle>& getObstacles();
+    std::vector<CurveSegment>& updObstacles();
+    const std::vector<CurveSegment>& getObstacles();
 
     Real getLength(const State& state) const;
+    Real getLengthDot(const State& state) const;
 
     class Impl;
 private:
-    explicit WrappingPath(std::unique_ptr<Impl> impl);
+    explicit CableSpan(std::unique_ptr<Impl> impl);
 
     const Impl& getImpl() const { return *impl; }
     Impl& updImpl() { return *impl; }
 
     std::shared_ptr<Impl> impl = nullptr;
 
-    friend WrapObstacle::Impl;
-    friend WrappingPathSubsystem;
+    friend CurveSegment::Impl;
+    friend CableSubsystem;
 };
 
 //==============================================================================
 //                                SUBSYSTEM
 //==============================================================================
 
-class SimTK_SIMBODY_EXPORT WrappingPathSubsystem : public Subsystem
+// Rename to CableTrackerSubSystem? WrappingPathSubsystem?
+class SimTK_SIMBODY_EXPORT CableSubsystem : public Subsystem
 {
 public:
-    WrappingPathSubsystem();
-    explicit WrappingPathSubsystem(MultibodySystem&);
+    CableSubsystem();
+    explicit CableSubsystem(MultibodySystem&);
 
     int getNumPaths() const;
-    const WrappingPath& getPath(WrappingPathIndex idx) const;
-    WrappingPath& updPath(WrappingPathIndex idx);
+    const CableSpan& getPath(WrappingPathIndex idx) const;
+    CableSpan& updPath(WrappingPathIndex idx);
 
     size_t writePathPoints(std::vector<Vec3>& points) const;
     size_t writePathFrames(std::vector<Transform>& frenetFrames) const;
 
 /* private: */
-    SimTK_PIMPL_DOWNCAST(WrappingPathSubsystem, Subsystem);
+    SimTK_PIMPL_DOWNCAST(CableSubsystem, Subsystem);
     class Impl;
     Impl& updImpl();
     const Impl& getImpl() const;

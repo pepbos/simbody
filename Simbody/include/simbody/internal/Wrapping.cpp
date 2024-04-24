@@ -12,14 +12,14 @@ using namespace SimTK;
 using Correction = ContactGeometry::GeodesicCorrection;
 using FrameVariation = ContactGeometry::GeodesicFrameVariation;
 using FrenetFrame = ContactGeometry::FrenetFrame;
-using GeodesicInfo = WrapObstacle::Impl::PosInfo;
-using LocalGeodesicInfo = WrapObstacle::Impl::Surface::LocalGeodesicInfo;
-using GeodesicInitialConditions = WrapObstacle::Impl::Surface::GeodesicInitialConditions;
+using GeodesicInfo = CurveSegment::Impl::PosInfo;
+using LocalGeodesicInfo = CurveSegment::Impl::LocalGeodesic::LocalGeodesicInfo;
+using GeodesicInitialConditions = CurveSegment::Impl::LocalGeodesic::GeodesicInitialConditions;
 using GeodesicJacobian = Vec4;
 using PointVariation = ContactGeometry::GeodesicPointVariation;
 using Variation = ContactGeometry::GeodesicVariation;
-using LineSegment = WrappingPath::LineSegment;
-using Status = WrapObstacle::Impl::Status;
+using LineSegment = CableSpan::LineSegment;
+using Status = CurveSegment::Impl::Status;
 
 //==============================================================================
 //                                CONSTANTS
@@ -179,7 +179,7 @@ GeodesicInitialConditions GeodesicInitialConditions::CreateAtTouchdown(Vec3 prev
 //==============================================================================
 //                                SURFACE IMPL
 //==============================================================================
-using Surface = WrapObstacle::Impl::Surface;
+using Surface = CurveSegment::Impl::LocalGeodesic;
 
 //------------------------------------------------------------------------------
 //                               REALIZE CACHE
@@ -313,8 +313,8 @@ void Surface::calcStatus(const Vec3& prev_QS, const Vec3& next_PS, CacheEntry& c
 //                               OBSTACLE
 //==============================================================================
 
-WrapObstacle::Impl::Impl(
-            WrappingPath path,
+CurveSegment::Impl::Impl(
+            CableSpan path,
             const MobilizedBody& mobod,
             const Transform& X_BS,
             ContactGeometry geometry,
@@ -330,14 +330,14 @@ WrapObstacle::Impl::Impl(
     throw std::runtime_error("NOTYETIMPLEMENTED: Must adopt to path, and give the index");
 }
 
-void WrapObstacle::Impl::realizeTopology(State &s)
+void CurveSegment::Impl::realizeTopology(State &s)
 {
 	// Allocate position level cache.
 	PosInfo posInfo {};
 	m_PosInfoIx = m_Subsystem.allocateCacheEntry(s, Stage::Position, new Value<PosInfo>(posInfo));
 }
 
-void WrapObstacle::Impl::realizePosition(const State &s) const
+void CurveSegment::Impl::realizePosition(const State &s) const
 {
 	if (!m_Subsystem.isCacheValueRealized(s, m_PosInfoIx)) {
 		calcPosInfo(s, updPosInfo(s));
@@ -345,7 +345,7 @@ void WrapObstacle::Impl::realizePosition(const State &s) const
 	}
 }
 
-void WrapObstacle::Impl::calcInitZeroLengthGeodesic(State& s, Vec3 prev_QG) const
+void CurveSegment::Impl::calcInitZeroLengthGeodesic(State& s, Vec3 prev_QG) const
 {
 	// Get tramsform from local surface frame to ground.
 	Transform X_GS = m_Mobod.getBodyTransform(s).compose(m_Offset);
@@ -359,7 +359,7 @@ void WrapObstacle::Impl::calcInitZeroLengthGeodesic(State& s, Vec3 prev_QG) cons
 	m_Subsystem.markCacheValueNotRealized(s, m_PosInfoIx);
 }
 
-void WrapObstacle::Impl::applyGeodesicCorrection(const State& s, const WrapObstacle::Impl::Correction& c) const
+void CurveSegment::Impl::applyGeodesicCorrection(const State& s, const CurveSegment::Impl::Correction& c) const
 {
     // Apply correction to curve.
     m_Surface.applyGeodesicCorrection(s, c);
@@ -368,7 +368,7 @@ void WrapObstacle::Impl::applyGeodesicCorrection(const State& s, const WrapObsta
 	m_Subsystem.markCacheValueNotRealized(s, m_PosInfoIx);
 }
 
-size_t WrapObstacle::Impl::calcPathPoints(const State& s, std::vector<Vec3>& points) const
+size_t CurveSegment::Impl::calcPathPoints(const State& s, std::vector<Vec3>& points) const
 {
     const Transform& X_GS = getPosInfo(s).X_GS;
     size_t n = m_Surface.calcPathPoints(s, points);
@@ -378,7 +378,7 @@ size_t WrapObstacle::Impl::calcPathPoints(const State& s, std::vector<Vec3>& poi
     return n;
 }
 
-void WrapObstacle::Impl::calcPosInfo(
+void CurveSegment::Impl::calcPosInfo(
 		const State& s,
 		PosInfo& posInfo) const
 {
@@ -434,9 +434,9 @@ void WrapObstacle::Impl::calcPosInfo(
 namespace
 {
 
-const WrapObstacle* FindPrevActiveObstacle(
+const CurveSegment* FindPrevActiveObstacle(
 	const State& s,
-    const std::vector<WrapObstacle>& obs,
+    const std::vector<CurveSegment>& obs,
     size_t idx)
 {
     for (ptrdiff_t i = idx - 1; i > 0; --i) {
@@ -448,9 +448,9 @@ const WrapObstacle* FindPrevActiveObstacle(
     return nullptr;
 }
 
-const WrapObstacle* FindNextActiveObstacle(
+const CurveSegment* FindNextActiveObstacle(
 	const State& s,
-    const std::vector<WrapObstacle>& obs,
+    const std::vector<CurveSegment>& obs,
     size_t idx)
 {
     // Find the active segment after the current.
@@ -508,7 +508,7 @@ GeodesicJacobian addPathErrorJacobian(
 //                                PATH IMPL
 //==============================================================================
 
-void WrappingPath::Impl::realizeTopology(State &s)
+void CableSpan::Impl::realizeTopology(State &s)
 {
 	PosInfo posInfo {};
 	m_PosInfoIx = m_Subsystem.allocateCacheEntry(s, Stage::Position, new Value<PosInfo>(posInfo));
@@ -517,47 +517,47 @@ void WrappingPath::Impl::realizeTopology(State &s)
 	m_VelInfoIx = m_Subsystem.allocateCacheEntry(s, Stage::Velocity, new Value<VelInfo>(velInfo));
 }
 
-void WrappingPath::Impl::realizePosition(const State &s) const
+void CableSpan::Impl::realizePosition(const State &s) const
 {
 	if (m_Subsystem.isCacheValueRealized(s, m_PosInfoIx)) {return;}
 	calcPosInfo(s, updPosInfo(s));
 	m_Subsystem.markCacheValueRealized(s, m_PosInfoIx);
 }
 
-void WrappingPath::Impl::realizeVelocity(const State &s) const
+void CableSpan::Impl::realizeVelocity(const State &s) const
 {
 	if (m_Subsystem.isCacheValueRealized(s, m_VelInfoIx)) {return;}
 	calcVelInfo(s, updVelInfo(s));
 	m_Subsystem.markCacheValueRealized(s, m_VelInfoIx);
 }
 
-const WrappingPath::Impl::PosInfo& WrappingPath::Impl::getPosInfo(const State &s) const
+const CableSpan::Impl::PosInfo& CableSpan::Impl::getPosInfo(const State &s) const
 {
 	realizePosition(s);
     return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(s, m_PosInfoIx));
 }
 
-WrappingPath::Impl::PosInfo& WrappingPath::Impl::updPosInfo(const State &s) const
+CableSpan::Impl::PosInfo& CableSpan::Impl::updPosInfo(const State &s) const
 {
     return Value<PosInfo>::updDowncast(m_Subsystem.updCacheEntry(s, m_PosInfoIx));
 }
 
-const WrappingPath::Impl::VelInfo& WrappingPath::Impl::getVelInfo(const State &s) const
+const CableSpan::Impl::VelInfo& CableSpan::Impl::getVelInfo(const State &s) const
 {
 	realizeVelocity(s);
     return Value<VelInfo>::downcast(m_Subsystem.getCacheEntry(s, m_VelInfoIx));
 }
 
-WrappingPath::Impl::VelInfo& WrappingPath::Impl::updVelInfo(const State &s) const
+CableSpan::Impl::VelInfo& CableSpan::Impl::updVelInfo(const State &s) const
 {
     return Value<VelInfo>::updDowncast(m_Subsystem.updCacheEntry(s, m_VelInfoIx));
 }
 
-void WrappingPath::Impl::calcInitZeroLengthGeodesic(State& s) const
+void CableSpan::Impl::calcInitZeroLengthGeodesic(State& s) const
 {
 	Vec3 prev_QG = m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
 	size_t i = 0;
-	for (const WrapObstacle& obstacle: m_Obstacles) {
+	for (const CurveSegment& obstacle: m_CurveSegments) {
 	    if (obstacle.getImpl().getStatus(s) == Status::Disabled) {
 	        continue;
         }
@@ -568,9 +568,9 @@ void WrappingPath::Impl::calcInitZeroLengthGeodesic(State& s) const
 }
 
 template<size_t N>
-void WrappingPath::Impl::calcPathErrorVector(
+void CableSpan::Impl::calcPathErrorVector(
 	const State& s,
-    const std::vector<WrapObstacle>& obs,
+    const std::vector<CurveSegment>& obs,
     const std::vector<LineSegment>& lines,
     std::array<CoordinateAxis, N> axes,
     Vector& pathError)
@@ -578,7 +578,7 @@ void WrappingPath::Impl::calcPathErrorVector(
     size_t lineIx = 0;
     ptrdiff_t row  = -1;
 
-    for (const WrapObstacle& o : obs) {
+    for (const CurveSegment& o : obs) {
         if (!o.getImpl().isActive(s)) {
             continue;
         }
@@ -595,9 +595,9 @@ void WrappingPath::Impl::calcPathErrorVector(
 }
 
 template<size_t N>
-void WrappingPath::Impl::calcPathErrorJacobian(
+void CableSpan::Impl::calcPathErrorJacobian(
 	const State& s,
-    const std::vector<WrapObstacle>& obs,
+    const std::vector<CurveSegment>& obs,
     const std::vector<LineSegment>& lines,
     std::array<CoordinateAxis, N> axes,
     Matrix& J)
@@ -621,8 +621,8 @@ void WrappingPath::Impl::calcPathErrorJacobian(
         const LineSegment& l_P = lines.at(i);
         const LineSegment& l_Q = lines.at(i + 1);
 
-        const WrapObstacle* prev = FindPrevActiveObstacle(s, obs, i);
-        const WrapObstacle* next = FindNextActiveObstacle(s, obs, i);
+        const CurveSegment* prev = FindPrevActiveObstacle(s, obs, i);
+        const CurveSegment* next = FindNextActiveObstacle(s, obs, i);
 
         for (CoordinateAxis axis: axes) {
             const UnitVec3 a_P = g.KP.R().getAxisUnitVec(axis);
@@ -654,9 +654,9 @@ void WrappingPath::Impl::calcPathErrorJacobian(
     };
 }
 
-double WrappingPath::Impl::calcPathLength(
+double CableSpan::Impl::calcPathLength(
 	const State& s,
-    const std::vector<WrapObstacle>& obs,
+    const std::vector<CurveSegment>& obs,
     const std::vector<LineSegment>& lines)
 {
     double lTot = 0.;
@@ -665,7 +665,7 @@ double WrappingPath::Impl::calcPathLength(
         lTot += line.l;
     }
 
-    for (const WrapObstacle& obstacle : obs) {
+    for (const CurveSegment& obstacle : obs) {
         if (!obstacle.getImpl().isActive(s))
 		{
             continue;
@@ -675,17 +675,17 @@ double WrappingPath::Impl::calcPathLength(
     return lTot;
 }
 
-void WrappingPath::Impl::calcLineSegments(
+void CableSpan::Impl::calcLineSegments(
 	const State& s,
     Vec3 p_O,
     Vec3 p_I,
     std::vector<LineSegment>& lines) const
 {
-    lines.resize(m_Obstacles.size() + 1);
+    lines.resize(m_CurveSegments.size() + 1);
     lines.clear();
 
     Vec3 lineStart = std::move(p_O);
-    for (const WrapObstacle& o : m_Obstacles) {
+    for (const CurveSegment& o : m_CurveSegments) {
         if (!o.getImpl().isActive(s)) {
             continue;
         }
@@ -699,30 +699,30 @@ void WrappingPath::Impl::calcLineSegments(
     lines.emplace_back(lineStart, p_I);
 }
 
-Vec3 WrappingPath::Impl::FindPrevPoint(
+Vec3 CableSpan::Impl::FindPrevPoint(
         const State& s,
         const Vec3& originPoint,
-    const std::vector<WrapObstacle>& obs,
+    const std::vector<CurveSegment>& obs,
     size_t idx)
 {
-    const WrapObstacle* prev = FindPrevActiveObstacle(s, obs, idx);
+    const CurveSegment* prev = FindPrevActiveObstacle(s, obs, idx);
     return prev ? prev->getImpl().getPosInfo(s).KQ.p() : originPoint;
 }
 
-Vec3 WrappingPath::Impl::FindNextPoint(
+Vec3 CableSpan::Impl::FindNextPoint(
         const State& s,
         const Vec3& terminationPoint,
-    const std::vector<WrapObstacle>& obs,
+    const std::vector<CurveSegment>& obs,
     size_t idx)
 {
-    const WrapObstacle* next = FindNextActiveObstacle(s, obs, idx);
+    const CurveSegment* next = FindNextActiveObstacle(s, obs, idx);
     return next ? next->getImpl().getPosInfo(s).KP.p() : terminationPoint;
 }
 
-size_t WrappingPath::Impl::countActive(const State& s) const
+size_t CableSpan::Impl::countActive(const State& s) const
 {
     size_t count = 0;
-    for (const WrapObstacle& o : m_Obstacles) {
+    for (const CurveSegment& o : m_CurveSegments) {
         if (o.getImpl().isActive(s)) {
             ++count;
         }
@@ -730,7 +730,7 @@ size_t WrappingPath::Impl::countActive(const State& s) const
     return count;
 }
 
-void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
+void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 {
 	// Path origin and termination point.
 	const Vec3 x_O = m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
@@ -750,20 +750,20 @@ void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         calcLineSegments(s, x_O, x_I, data.lineSegments);
 
         // Evaluate path error, and stop when converged.
-        calcPathErrorVector<2>(s, m_Obstacles, data.lineSegments, axes, data.pathError);
+        calcPathErrorVector<2>(s, m_CurveSegments, data.lineSegments, axes, data.pathError);
         const Real maxPathError = data.pathError.normInf();
         if (maxPathError < m_PathErrorBound) {
             return;
         }
 
         // Evaluate the path error jacobian.
-        calcPathErrorJacobian<2>(s, m_Obstacles, data.lineSegments, axes, data.pathErrorJacobian);
+        calcPathErrorJacobian<2>(s, m_CurveSegments, data.lineSegments, axes, data.pathErrorJacobian);
 
         // Compute path corrections.
 		const Correction* corrIt = calcPathCorrections(data);
 
         // Apply path corrections.
-        for (const WrapObstacle& obstacle : m_Obstacles) {
+        for (const CurveSegment& obstacle : m_CurveSegments) {
             if (!obstacle.getImpl().isActive(s)) {
                 continue;
             }
@@ -775,7 +775,7 @@ void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         dataCache.unlock();
 
         // Path has changed: invalidate each segment's cache.
-        for (const WrapObstacle& obstacle : m_Obstacles) {
+        for (const CurveSegment& obstacle : m_CurveSegments) {
             obstacle.getImpl().invalidatePositionLevelCache(s);
         }
     }
@@ -783,15 +783,15 @@ void WrappingPath::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 	throw std::runtime_error("Failed to converge");
 }
 
-void WrappingPath::Impl::calcVelInfo(const State& s, VelInfo& velInfo) const
+void CableSpan::Impl::calcVelInfo(const State& s, VelInfo& velInfo) const
 {
     const PosInfo& pos = getPosInfo(s);
 
     Real lengthDot = 0.;
 
     Vec3 v_GQ = m_OriginBody.findStationVelocityInGround(s, m_OriginPoint);
-    const WrapObstacle* lastActive = nullptr;
-    for (const WrapObstacle& obstacle : m_Obstacles) {
+    const CurveSegment* lastActive = nullptr;
+    for (const CurveSegment& obstacle : m_CurveSegments) {
         if (!obstacle.getImpl().isActive(s)) {
             continue;
         }
@@ -819,26 +819,26 @@ void WrappingPath::Impl::calcVelInfo(const State& s, VelInfo& velInfo) const
 //            SUBSYSTEM
 //==============================================================================
 
-bool WrappingPathSubsystem::isInstanceOf(const Subsystem& s) {
+bool CableSubsystem::isInstanceOf(const Subsystem& s) {
     return Impl::isA(s.getSubsystemGuts());
 }
 
-const WrappingPathSubsystem& WrappingPathSubsystem::
+const CableSubsystem& CableSubsystem::
 downcast(const Subsystem& s) {
     assert(isInstanceOf(s));
-    return static_cast<const WrappingPathSubsystem&>(s);
+    return static_cast<const CableSubsystem&>(s);
 }
-WrappingPathSubsystem& WrappingPathSubsystem::
+CableSubsystem& CableSubsystem::
 updDowncast(Subsystem& s) {
     assert(isInstanceOf(s));
-    return static_cast<WrappingPathSubsystem&>(s);
+    return static_cast<CableSubsystem&>(s);
 }
 
-const WrappingPathSubsystem::Impl& WrappingPathSubsystem::
+const CableSubsystem::Impl& CableSubsystem::
 getImpl() const {
     return SimTK_DYNAMIC_CAST_DEBUG<const Impl&>(getSubsystemGuts());
 }
-WrappingPathSubsystem::Impl& WrappingPathSubsystem::
+CableSubsystem::Impl& CableSubsystem::
 updImpl() {
     return SimTK_DYNAMIC_CAST_DEBUG<Impl&>(updSubsystemGuts());
 }
@@ -846,20 +846,20 @@ updImpl() {
 // Create Subsystem but don't associate it with any System. This isn't much use
 // except for making std::vectors, which require a default constructor to be 
 // available.
-WrappingPathSubsystem::WrappingPathSubsystem() 
+CableSubsystem::CableSubsystem() 
 {   adoptSubsystemGuts(new Impl()); }
 
-WrappingPathSubsystem::WrappingPathSubsystem(MultibodySystem& mbs) 
+CableSubsystem::CableSubsystem(MultibodySystem& mbs) 
 {   adoptSubsystemGuts(new Impl());
     mbs.adoptSubsystem(*this); } // steal ownership
 
-int WrappingPathSubsystem::getNumPaths() const
+int CableSubsystem::getNumPaths() const
 {   return getImpl().getNumPaths(); }
 
-const WrappingPath& WrappingPathSubsystem::
+const CableSpan& CableSubsystem::
 getPath(WrappingPathIndex cableIx) const
 {   return getImpl().getCablePath(cableIx); }
 
-WrappingPath& WrappingPathSubsystem::
+CableSpan& CableSubsystem::
 updPath(WrappingPathIndex cableIx)
 {   return updImpl().updCablePath(cableIx); }
