@@ -30,14 +30,18 @@ class CableSpan;
 class SimTK_SIMBODY_EXPORT CurveSegment
 {
 public:
-    CurveSegment()                                 = default;
-    CurveSegment(const CurveSegment&)              = delete;
-    CurveSegment& operator = (const CurveSegment&) = delete;
-    CurveSegment(CurveSegment&&) noexcept                  = default;
-    CurveSegment& operator = (CurveSegment&&) noexcept     = default;
-    ~CurveSegment()                                = default;
+    CurveSegment()                                   = default;
+    CurveSegment(const CurveSegment&)                = delete;
+    CurveSegment& operator=(const CurveSegment&)     = delete;
+    CurveSegment(CurveSegment&&) noexcept            = default;
+    CurveSegment& operator=(CurveSegment&&) noexcept = default;
+    ~CurveSegment()                                  = default;
 
-    CurveSegment(const MobilizedBody& mobod, Transform X_BS, const ContactGeometry& geometry, Vec3 xHint);
+    CurveSegment(
+        const MobilizedBody& mobod,
+        Transform X_BS,
+        const ContactGeometry& geometry,
+        Vec3 xHint);
 
     class Impl;
 
@@ -59,7 +63,9 @@ public:
     void setEnabled(const State& state) const;
 
     int calcPathPoints(const State& state, std::vector<Vec3>& points);
-    int calcPathFrenetFrames(const State& state, std::vector<ContactGeometry::FrenetFrame>& frames);
+    int calcPathFrenetFrames(
+        const State& state,
+        std::vector<ContactGeometry::FrenetFrame>& frames);
 
 private:
     explicit CurveSegment(std::unique_ptr<Impl> impl);
@@ -78,11 +84,11 @@ private:
 class SimTK_SIMBODY_EXPORT CableSpan
 {
 public:
-        struct LineSegment
-        {
-            UnitVec3 d {NaN, NaN, NaN};
-            Real l = NaN;
-        };
+    struct LineSegment
+    {
+        UnitVec3 d{NaN, NaN, NaN};
+        Real l = NaN;
+    };
 
 public:
     CableSpan(
@@ -99,19 +105,28 @@ public:
     Real getLengthDot(const State& state) const;
 
     void applyBodyForces(
-            const State& state,
-            Real tension,
-            Vector_<SpatialVec>& bodyForcesInG) const;
+        const State& state,
+        Real tension,
+        Vector_<SpatialVec>& bodyForcesInG) const;
 
     int calcPathPoints(const State& state, std::vector<Vec3>& points);
-    int calcPathFrenetFrames(const State& state, std::vector<ContactGeometry::FrenetFrame>& frames);
+    int calcPathFrenetFrames(
+        const State& state,
+        std::vector<ContactGeometry::FrenetFrame>& frames);
 
     class Impl;
+
 private:
     explicit CableSpan(std::unique_ptr<Impl> impl);
 
-    const Impl& getImpl() const { return *impl; }
-    Impl& updImpl() { return *impl; }
+    const Impl& getImpl() const
+    {
+        return *impl;
+    }
+    Impl& updImpl()
+    {
+        return *impl;
+    }
 
     std::shared_ptr<Impl> impl = nullptr;
 
@@ -137,7 +152,7 @@ public:
     size_t writePathPoints(std::vector<Vec3>& points) const;
     size_t writePathFrames(std::vector<Transform>& frenetFrames) const;
 
-/* private: */
+    /* private: */
     SimTK_PIMPL_DOWNCAST(CableSubsystem, Subsystem);
     class Impl;
     Impl& updImpl();
