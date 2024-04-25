@@ -120,6 +120,11 @@ public:
             Real l = NaN;
         };
 
+        bool analyticFormAvailable() const
+        {
+            return m_Geometry.analyticFormAvailable();
+        }
+
         const LocalGeodesicInfo& calcInitialGeodesic(
             State& s,
             const GeodesicInitialConditions& g0) const;
@@ -137,9 +142,11 @@ public:
         // shoot a new geodesic, updating the cache variable.
         void applyGeodesicCorrection(const State& s, const Correction& c) const;
 
-        // Compute the path points of the current geodesic, and write them to the buffer.
-        // These points are in local surface coordinates. Returns the number of points written.
-        size_t calcPathPoints(const State& state, std::vector<Vec3>& points) const;
+        // Compute the path points of the current geodesic, and write them to
+        // the buffer. These points are in local surface coordinates. Returns
+        // the number of points written.
+        void calcPathPoints(const State& state, std::vector<Vec3>& points)
+            const;
 
         // Set the user defined point that controls the initial wrapping path.
         void setInitialPointGuess(Vec3 initPointGuess)
@@ -166,8 +173,8 @@ public:
         struct CacheEntry : LocalGeodesicInfo
         {
             Vec3 trackingPointOnLine{NaN, NaN, NaN};
-            std::vector<Vec3> points{}; // Empty for analytic geoemetry with no
-                                        // allocation overhead.
+            std::vector<FrenetFrame> frames{}; // Empty for analytic geoemetry
+                                               // with no allocation overhead.
             double sHint = NaN;
         };
 
@@ -200,9 +207,8 @@ public:
             const Vec3& next_PS,
             CacheEntry& cache) const;
 
-        void assertSurfaceBounds(
-            const Vec3& prev_QS,
-            const Vec3& next_PS) const;
+        void assertSurfaceBounds(const Vec3& prev_QS, const Vec3& next_PS)
+            const;
 
         void calcTouchdownIfNeeded(
             const Vec3& prev_QS,
@@ -225,8 +231,16 @@ public:
 
         Vec3 m_InitPointGuess;
 
+        size_t m_ProjectionMaxIter        = 10;
+        Real m_ProjectionRequiredAccuracy = 1e-10;
+        Real m_IntegratorAccuracy         = 1e-6;
+
         Real m_TouchdownAccuracy = 1e-3;
         size_t m_TouchdownIter   = 10;
+
+        // TODO this must be a function argument such that the caller can
+        // decide,
+        size_t m_NumberOfAnalyticPoints = 10;
 
         DiscreteVariableIndex m_CacheIx;
     };
@@ -295,7 +309,7 @@ public:
         const State& state,
         const ContactGeometry::GeodesicCorrection& c) const;
 
-    size_t calcPathPoints(const State& state, std::vector<Vec3>& points) const;
+    void calcPathPoints(const State& state, std::vector<Vec3>& points) const;
 
     /* const MobilizedBody& getMobilizedBody() const {return m_Mobod;} */
     void calcContactPointVelocitiesInGround(
@@ -356,7 +370,7 @@ private:
     MobilizedBody m_Mobod;
     Transform m_Offset;
 
-    LocalGeodesic m_Surface;
+    LocalGeodesic m_Surface; // TODO rename
 
     // TOPOLOGY CACHE
     CacheEntryIndex m_PosInfoIx;

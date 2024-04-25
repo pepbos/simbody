@@ -140,22 +140,62 @@ struct GeodesicBoundaryFrame {
     GeodesicVariation v_Q{};
 };
 
-void calcNearestFrenetFrameFast(Vec3 x, Vec3 thint, FrenetFrame& X_BP) const;
-void calcGeodesicStartFrameVariation(const FrenetFrame& X_BP, GeodesicVariation& dX_BP) const;
-void calcGeodesicEndFrameVariationImplicitly(
-        Vec3 x,
-        UnitVec3 t, Real l, Real sHint,
-        FrenetFrame& X_BQ,
-        GeodesicVariation& dX_BQ,
-        std::vector<Vec3>& points) const;
-void calcGeodesicEndFrameVariationAnalytically(        Vec3 x,
-        UnitVec3 t, Real l,
-        FrenetFrame& X_BQ,
-        GeodesicVariation& dX_BQ) const;
-void calcGeodesicPointsAnalytically(Vec3 x, UnitVec3 t, Real l, std::vector<Vec3>& points);
 bool analyticFormAvailable() const;
 
-bool calcNearestPointOnLine(Vec3 a, Vec3 b, Vec3& point, size_t maxIter, double eps) const;
+void calcGeodesicWithVariationAnalytically(
+    Vec3 xGuess,
+    Vec3 tGuess,
+    Real l,
+    FrenetFrame& X_P,
+    GeodesicVariation& dX_P,
+    FrenetFrame& X_Q,
+    GeodesicVariation& dX_Q) const;
+
+void resampleGeodesicPointsAnalytically(
+    const FrenetFrame& X_P,
+    const FrenetFrame& X_Q,
+    Real l,
+    size_t size,
+    std::vector<Vec3>& points) const;
+
+void resampleGeodesicFramesAnalytically(
+    const FrenetFrame& X_P,
+    const FrenetFrame& X_Q,
+    Real l,
+    size_t size,
+    std::vector<FrenetFrame>& frames) const;
+
+void calcNearestFrenetFrameImplicitlyFast(
+    Vec3 xGuess,
+    Vec3 tGuess,
+    FrenetFrame& X_P,
+    size_t maxIter,
+    Real eps) const;
+
+void calcGeodesicStartFrameVariationImplicitly(
+    const FrenetFrame& X_P,
+    GeodesicVariation& dX_P) const;
+
+void calcGeodesicEndFrameVariationImplicitly(
+    const FrenetFrame& KP,
+    Real l,
+    FrenetFrame& X_Q,
+    GeodesicVariation& dX_Q,
+    Real initStepSize,
+    Real accuracy,
+    std::vector<FrenetFrame>& frames) const;
+
+bool calcNearestPointOnLineImplicitly(
+    Vec3 a,
+    Vec3 b,
+    Vec3& point,
+    size_t maxIter,
+    double eps) const;
+
+bool calcNearestPointOnLineAnalytically(
+    Vec3 a,
+    Vec3 b,
+    Vec3& point) const;
 
 // TODO
 class Cone;
