@@ -118,27 +118,17 @@ class Cylinder;
 class Brick;
 class TriangleMesh;
 
-
-using FrenetFrame = Transform;
-
 static const CoordinateAxis TangentAxis;
 static const CoordinateAxis NormalAxis;
 static const CoordinateAxis BinormalAxis;
 
 static constexpr int GEODESIC_DOF = 4;
 
+using FrenetFrame = Transform;
 using GeodesicPointVariation = Mat34;
 using GeodesicFrameVariation = Mat34;
 using GeodesicVariation = std::array<Mat34, 2>;
 using GeodesicCorrection = Vec4;
-
-struct GeodesicBoundaryFrame {
-    FrenetFrame K_P{};
-    FrenetFrame K_Q{};
-
-    GeodesicVariation v_P{};
-    GeodesicVariation v_Q{};
-};
 
 bool analyticFormAvailable() const;
 
@@ -146,41 +136,41 @@ void calcGeodesicWithVariationAnalytically(
     Vec3 xGuess,
     Vec3 tGuess,
     Real l,
-    FrenetFrame& X_P,
-    GeodesicVariation& dX_P,
-    FrenetFrame& X_Q,
-    GeodesicVariation& dX_Q) const;
+    FrenetFrame& K_P,
+    GeodesicVariation& dK_P,
+    FrenetFrame& K_Q,
+    GeodesicVariation& dK_Q) const;
 
 void resampleGeodesicPointsAnalytically(
-    const FrenetFrame& X_P,
-    const FrenetFrame& X_Q,
+    const FrenetFrame& K_P,
+    const FrenetFrame& K_Q,
     Real l,
     size_t size,
     std::vector<Vec3>& points) const;
 
 void resampleGeodesicFramesAnalytically(
-    const FrenetFrame& X_P,
-    const FrenetFrame& X_Q,
+    const FrenetFrame& K_P,
+    const FrenetFrame& K_Q,
     Real l,
     size_t size,
     std::vector<FrenetFrame>& frames) const;
 
-void calcNearestFrenetFrameImplicitlyFast(
+size_t calcNearestFrenetFrameImplicitlyFast(
     Vec3 xGuess,
     Vec3 tGuess,
-    FrenetFrame& X_P,
+    FrenetFrame& K_P,
     size_t maxIter,
     Real eps) const;
 
 void calcGeodesicStartFrameVariationImplicitly(
-    const FrenetFrame& X_P,
-    GeodesicVariation& dX_P) const;
+    const FrenetFrame& K_P,
+    GeodesicVariation& dK_P) const;
 
 void calcGeodesicEndFrameVariationImplicitly(
     const FrenetFrame& KP,
     Real l,
-    FrenetFrame& X_Q,
-    GeodesicVariation& dX_Q,
+    FrenetFrame& K_Q,
+    GeodesicVariation& dK_Q,
     Real initStepSize,
     Real accuracy,
     std::vector<FrenetFrame>& frames) const;

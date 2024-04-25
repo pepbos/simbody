@@ -89,6 +89,75 @@ public:
     virtual bool isConvex() const = 0;
     virtual bool isFinite() const = 0;
 
+    using FrenetFrame        = ContactGeometry::FrenetFrame;
+    using GeodesicVariation  = ContactGeometry::GeodesicVariation;
+    using GeodesicCorrection = ContactGeometry::GeodesicCorrection;
+
+    virtual bool analyticFormAvailable() const {return false;}
+
+    virtual void calcGeodesicWithVariationAnalytically(
+            Vec3 xGuess,
+            Vec3 tGuess,
+            Real l,
+            FrenetFrame& K_P,
+            GeodesicVariation& dK_P,
+            FrenetFrame& K_Q,
+            GeodesicVariation& dK_Q) const
+    {   SimTK_THROW2(Exception::UnimplementedVirtualMethod, 
+        "ContactGeometryImpl", "calcGeodesicWithVariationAnalytically"); }
+
+    virtual void resampleGeodesicPointsAnalytically(
+            const FrenetFrame& K_P,
+            const FrenetFrame& K_Q,
+            Real l,
+            size_t size,
+            std::vector<Vec3>& points) const
+    {   SimTK_THROW2(Exception::UnimplementedVirtualMethod, 
+        "ContactGeometryImpl", "resampleGeodesicPointsAnalytically"); }
+
+    virtual void resampleGeodesicFramesAnalytically(
+            const FrenetFrame& K_P,
+            const FrenetFrame& K_Q,
+            Real l,
+            size_t size,
+            std::vector<FrenetFrame>& frames) const
+    {   SimTK_THROW2(Exception::UnimplementedVirtualMethod, 
+        "ContactGeometryImpl", "resampleGeodesicFramesAnalytically"); }
+
+    virtual size_t calcNearestFrenetFrameImplicitlyFast(
+            Vec3 xGuess,
+            Vec3 tGuess,
+            FrenetFrame& K_P,
+            size_t maxIter,
+            Real eps) const;
+
+    virtual void calcGeodesicStartFrameVariationImplicitly(
+            const FrenetFrame& K_P,
+            GeodesicVariation& dK_P) const;
+
+    virtual void calcGeodesicEndFrameVariationImplicitly(
+            const FrenetFrame& KP,
+            Real l,
+            FrenetFrame& K_Q,
+            GeodesicVariation& dK_Q,
+            Real initStepSize,
+            Real accuracy,
+            std::vector<FrenetFrame>& frames) const;
+
+    virtual bool calcNearestPointOnLineImplicitly(
+            Vec3 a,
+            Vec3 b,
+            Vec3& point,
+            size_t maxIter,
+            double eps) const;
+
+    virtual bool calcNearestPointOnLineAnalytically(
+            Vec3 a,
+            Vec3 b,
+            Vec3& point) const
+    {   SimTK_THROW2(Exception::UnimplementedVirtualMethod, 
+        "ContactGeometryImpl", "calcNearestPointOnLineAnalytically"); }
+
     // Smooth surfaces only.
     virtual void calcCurvature(const Vec3& point, Vec2& curvature, 
                        Rotation& orientation) const
