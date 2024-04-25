@@ -62,6 +62,8 @@ public:
     void setDisabled(const State& state) const;
     void setEnabled(const State& state) const;
 
+    const MobilizedBody& getMobilizedBody(const State& state) const;
+
     int calcSegmentPoints(const State& state, std::vector<Vec3>& points);
     int calcSegmentFrenetFrames(
         const State& state,

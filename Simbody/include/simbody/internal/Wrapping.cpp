@@ -159,7 +159,7 @@ GeodesicInitialConditions GeodesicInitialConditions::CreateCorrected(
     return g0;
 }
 
-GeodesicInitialConditions GeodesicInitialConditions::CreateInSurfaceFrame(
+GeodesicInitialConditions GeodesicInitialConditions::CreateFromGroundInSurfaceFrame(
     const Transform& X_GS,
     Vec3 x_G,
     Vec3 t_G,
@@ -175,14 +175,13 @@ GeodesicInitialConditions GeodesicInitialConditions::CreateInSurfaceFrame(
 }
 
 GeodesicInitialConditions GeodesicInitialConditions::CreateZeroLengthGuess(
-    const Transform& X_GS,
     Vec3 prev_QS,
     Vec3 xGuess_S)
 {
     GeodesicInitialConditions g0;
 
     g0.x = xGuess_S;
-    g0.t = g0.x - X_GS.shiftBaseStationToFrame(prev_QS);
+    g0.t = xGuess_S - prev_QS;
     g0.l = 0.;
 
     return g0;
@@ -205,12 +204,12 @@ GeodesicInitialConditions GeodesicInitialConditions::CreateAtTouchdown(
 //==============================================================================
 //                                SURFACE IMPL
 //==============================================================================
-using Surface = CurveSegment::Impl::LocalGeodesic;
+using LocalGeodesic = CurveSegment::Impl::LocalGeodesic;
 
 //------------------------------------------------------------------------------
 //                               REALIZE CACHE
 //------------------------------------------------------------------------------
-void Surface::realizeTopology(State& s)
+void LocalGeodesic::realizeTopology(State& s)
 {
     // Allocate an auto-update discrete variable for the last computed geodesic.
     CacheEntry cache{};
@@ -221,7 +220,7 @@ void Surface::realizeTopology(State& s)
         Stage::Position);
 }
 
-void Surface::realizePosition(const State& s) const
+void LocalGeodesic::realizePosition(const State& s) const
 {
     if (!m_Subsystem.isDiscreteVarUpdateValueRealized(s, m_CacheIx)) {
         updCacheEntry(s) = getPrevCacheEntry(s);
@@ -232,7 +231,7 @@ void Surface::realizePosition(const State& s) const
 //------------------------------------------------------------------------------
 //                               PUBLIC METHODS
 //------------------------------------------------------------------------------
-const LocalGeodesicInfo& Surface::calcInitialGeodesic(
+const LocalGeodesicInfo& LocalGeodesic::calcInitialGeodesic(
     State& s,
     const GeodesicInitialConditions& g0) const
 {
@@ -243,18 +242,18 @@ const LocalGeodesicInfo& Surface::calcInitialGeodesic(
     m_Subsystem.markDiscreteVarUpdateValueRealized(s, m_CacheIx);
 }
 
-const LocalGeodesicInfo& Surface::calcLocalGeodesic(
+const LocalGeodesicInfo& LocalGeodesic::calcLocalGeodesicInfo(
     const State& s,
     Vec3 prev_QS,
     Vec3 next_PS) const
 {
     realizePosition(s);
     CacheEntry& cache = updCacheEntry(s);
-    calcStatus(prev_QS, next_PS, cache);
+    calcCacheEntry(prev_QS, next_PS, cache);
     return cache;
 }
 
-void Surface::applyGeodesicCorrection(const State& s, const Correction& c) const
+void LocalGeodesic::applyGeodesicCorrection(const State& s, const Correction& c) const
 {
     realizePosition(s);
 
@@ -269,7 +268,7 @@ void Surface::applyGeodesicCorrection(const State& s, const Correction& c) const
     calcGeodesic(g0, updCacheEntry(s));
 }
 
-size_t Surface::calcPathPoints(const State& s, std::vector<Vec3>& points) const
+size_t LocalGeodesic::calcPathPoints(const State& s, std::vector<Vec3>& points) const
 {
     realizePosition(s);
 
@@ -286,7 +285,7 @@ size_t Surface::calcPathPoints(const State& s, std::vector<Vec3>& points) const
 //------------------------------------------------------------------------------
 //                               PRIVATE METHODS
 //------------------------------------------------------------------------------
-void Surface::calcGeodesic(
+void LocalGeodesic::calcGeodesic(
     const GeodesicInitialConditions& g0,
     CacheEntry& cache) const
 {
@@ -309,7 +308,87 @@ void Surface::calcGeodesic(
     throw std::runtime_error("NOTYETIMPLEMENTED");
 }
 
-void Surface::calcStatus(
+void LocalGeodesic::calcLiftoffIfNeeded(
+    const Vec3& prev_QS,
+    const Vec3& next_PS,
+    CacheEntry& cache) const
+{
+    // Only attempt liftoff when currently wrapping the surface.
+    LocalGeodesicInfo& g = cache;
+    if (g.status != Status::Ok) {
+        return;
+    }
+
+    // The curve length must have shrunk completely before lifting off.
+    if (g.length < 0.) {
+        return;
+    }
+
+    // For a zero-length curve, trigger liftoff when the prev and next points
+    // lie above the surface plane.
+    if (
+        dot(prev_QS - g.KP.p(), g.KP.R().getAxisUnitVec(NormalAxis)) <= 0.
+        &&
+        dot(next_PS - g.KP.p(), g.KP.R().getAxisUnitVec(NormalAxis)) <= 0.)
+    {
+        // No liftoff.
+        return;
+    }
+
+    // Liftoff detected: update status.
+    g.status = Status::Liftoff;
+    // Initialize the tracking point from the last geodesic start point.
+    cache.trackingPointOnLine = g.KP.p();
+
+}
+
+void LocalGeodesic::calcTouchdownIfNeeded(
+    const Vec3& prev_QS,
+    const Vec3& next_PS,
+    CacheEntry& cache) const
+{
+    // Only attempt touchdown when liftoff.
+    LocalGeodesicInfo& g = cache;
+    if (g.status != Status::Liftoff) {
+        return;
+    }
+
+    // Detect touchdown by computing the point on the line from x_QS to x_PS
+    // that is nearest to the surface.
+    if(!m_Geometry.calcNearestPointOnLine(
+        prev_QS,
+        next_PS,
+        cache.trackingPointOnLine,
+        m_TouchdownIter,
+        m_TouchdownAccuracy))
+    {
+        // No touchdown detected.
+        return;
+    }
+
+    // Touchdown detected: Remove the liftoff status flag.
+    g.status = Status::Ok;
+    // Shoot a zero length geodesic at the touchdown point.
+    GeodesicInitialConditions g0 =
+        GeodesicInitialConditions::CreateAtTouchdown(
+                prev_QS,
+                next_PS,
+                cache.trackingPointOnLine);
+    calcGeodesic(g0, cache);
+}
+
+void LocalGeodesic::assertSurfaceBounds(
+    const Vec3& prev_QS,
+    const Vec3& next_PS) const
+{
+    // Make sure that the previous point does not lie inside the surface.
+    SimTK_ASSERT(m_Geometry.calcSurfaceValue(prev_QS) < 0.,
+        "Unable to wrap over surface: Preceding point lies inside the surface");
+    SimTK_ASSERT(m_Geometry.calcSurfaceValue(next_PS) < 0.,
+        "Unable to wrap over surface: Next point lies inside the surface");
+}
+
+void LocalGeodesic::calcCacheEntry(
     const Vec3& prev_QS,
     const Vec3& next_PS,
     CacheEntry& cache) const
@@ -320,49 +399,9 @@ void Surface::calcStatus(
         return;
     }
 
-    // Make sure that the previous point does not lie inside the surface.
-    if (m_Geometry.calcSurfaceValue(prev_QS)) {
-        // TODO use proper assert.
-        throw std::runtime_error("Unable to wrap over surface: Preceding point "
-                                 "lies inside the surface");
-    }
-    if (m_Geometry.calcSurfaceValue(next_PS)) {
-        // TODO use proper assert.
-        throw std::runtime_error(
-            "Unable to wrap over surface: Next point lies inside the surface");
-    }
-
-    Vec3& pTrack = cache.trackingPointOnLine;
-
-    // Detect touchdown.
-    bool detectedTouchdown = g.status == Status::Liftoff;
-    detectedTouchdown &= m_Geometry.calcNearestPointOnLine(
-        prev_QS,
-        next_PS,
-        pTrack,
-        m_TouchdownIter,
-        m_TouchdownAccuracy);
-    if (detectedTouchdown) {
-        g.status = Status::Ok;
-        GeodesicInitialConditions g0 =
-            GeodesicInitialConditions::CreateAtTouchdown(
-                prev_QS,
-                next_PS,
-                cache.trackingPointOnLine);
-        calcGeodesic(g0, cache);
-    }
-
-    // Detect liftoff.
-    bool detectedLiftoff = g.status == Status::Ok;
-    detectedLiftoff &= g.length == 0.;
-    detectedLiftoff &=
-        dot(prev_QS - g.KP.p(), g.KP.R().getAxisUnitVec(NormalAxis)) > 0.;
-    detectedLiftoff &=
-        dot(next_PS - g.KP.p(), g.KP.R().getAxisUnitVec(NormalAxis)) > 0.;
-    if (detectedLiftoff) {
-        g.status = Status::Liftoff;
-        pTrack   = g.KP.p();
-    }
+    assertSurfaceBounds(prev_QS, next_PS);
+    calcTouchdownIfNeeded(prev_QS, next_PS, cache);
+    calcLiftoffIfNeeded(prev_QS, next_PS, cache);
 }
 
 //==============================================================================
@@ -411,7 +450,6 @@ void CurveSegment::Impl::calcInitZeroLengthGeodesic(State& s, Vec3 prev_QG)
 
     GeodesicInitialConditions g0 =
         GeodesicInitialConditions::CreateZeroLengthGuess(
-            X_GS,
             prev_QS,
             xGuess_S);
     m_Surface.calcInitialGeodesic(s, g0);
@@ -441,30 +479,12 @@ size_t CurveSegment::Impl::calcPathPoints(
     }
     return n;
 }
-
-void CurveSegment::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
+void CurveSegment::Impl::calcGeodesicInGround(
+        const LocalGeodesicInfo& geodesic_S,
+        const Transform& X_GS,
+        PosInfo& posInfo) const
 {
-    if (m_Surface.getStatus(s) == Status::Disabled) {
-        return;
-    }
-
-    // Compute tramsform from local surface frame to ground.
-    const Transform& X_GS = posInfo.X_GS =
-        m_Mobod.getBodyTransform(s).compose(m_Offset);
-
-    // Get the path points before and after this segment.
-    const Vec3 prev_G = m_Path.getImpl().findPrevPoint(s, m_Index);
-    const Vec3 next_G = m_Path.getImpl().findNextPoint(s, m_Index);
-
-    // Transform the prev and next path points to the surface frame.
-    const Vec3 prev_S = X_GS.shiftBaseStationToFrame(prev_G);
-    const Vec3 next_S = X_GS.shiftBaseStationToFrame(next_G);
-
-    // Detect liftoff, touchdown and potential invalid configurations.
-    // TODO this doesnt follow the regular invalidation scheme...
-    // Grab the last geodesic that was computed.
-    const LocalGeodesicInfo& geodesic_S =
-        m_Surface.calcLocalGeodesic(s, prev_S, next_S);
+    posInfo.X_GS = X_GS;
 
     // Store the the local geodesic in ground frame.
     posInfo.KP = X_GS.compose(geodesic_S.KP);
@@ -488,6 +508,34 @@ void CurveSegment::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
     posInfo.length = geodesic_S.length;
 
     throw std::runtime_error("NOTYETIMPLEMENTED: Check transformation order");
+}
+
+void CurveSegment::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
+{
+    if (m_Surface.getStatus(s) == Status::Disabled) {
+        return;
+    }
+
+    // Compute tramsform from local surface frame to ground.
+    const Transform& X_GS = posInfo.X_GS =
+        m_Mobod.getBodyTransform(s).compose(m_Offset);
+
+    // Get the path points before and after this segment.
+    const Vec3 prev_G = m_Path.getImpl().findPrevPoint(s, m_Index);
+    const Vec3 next_G = m_Path.getImpl().findNextPoint(s, m_Index);
+
+    // Transform the prev and next path points to the surface frame.
+    const Vec3 prev_S = X_GS.shiftBaseStationToFrame(prev_G);
+    const Vec3 next_S = X_GS.shiftBaseStationToFrame(next_G);
+
+    // Detect liftoff, touchdown and potential invalid configurations.
+    // TODO this doesnt follow the regular invalidation scheme...
+    // Grab the last geodesic that was computed.
+    const LocalGeodesicInfo& geodesic_S =
+        m_Surface.calcLocalGeodesicInfo(s, prev_S, next_S);
+
+    // Store the the local geodesic in ground frame.
+    calcGeodesicInGround(geodesic_S, X_GS, updPosInfo(s));
 }
 
 //==============================================================================

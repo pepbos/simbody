@@ -43,8 +43,7 @@ public:
         ContactGeometry geometry,
         Vec3 initPointGuess);
 
-    // The status of this curve segment in relation to the surface it wraps
-    // over.
+    // The status of this curve segment in relation to the surface it wraps over.
     enum class Status
     {
         Ok,
@@ -111,13 +110,12 @@ public:
                 const Variation& dKP,
                 Real l,
                 const Correction& c);
-            static GeodesicInitialConditions CreateInSurfaceFrame(
+            static GeodesicInitialConditions CreateFromGroundInSurfaceFrame(
                 const Transform& X_GS,
                 Vec3 x_G,
                 Vec3 t_G,
                 Real l);
             static GeodesicInitialConditions CreateZeroLengthGuess(
-                const Transform& X_GS,
                 Vec3 prev_QS,
                 Vec3 xGuess_S);
             static GeodesicInitialConditions CreateAtTouchdown(
@@ -133,7 +131,7 @@ public:
         const LocalGeodesicInfo& calcInitialGeodesic(
             State& s,
             const GeodesicInitialConditions& g0) const;
-        const LocalGeodesicInfo& calcLocalGeodesic(
+        const LocalGeodesicInfo& calcLocalGeodesicInfo(
             const State& s,
             Vec3 prev_QS,
             Vec3 next_PS) const; // TODO weird name
@@ -193,10 +191,25 @@ public:
                 m_Subsystem.updDiscreteVariable(state, m_CacheIx));
         }
 
-        void calcStatus(
+        void calcCacheEntry(
             const Vec3& prev_QS,
             const Vec3& next_PS,
             CacheEntry& cache) const;
+
+        void assertSurfaceBounds(
+            const Vec3& prev_QS,
+            const Vec3& next_PS) const;
+
+        void calcTouchdownIfNeeded(
+            const Vec3& prev_QS,
+            const Vec3& next_PS,
+            CacheEntry& cache) const;
+
+        void calcLiftoffIfNeeded(
+            const Vec3& prev_QS,
+            const Vec3& next_PS,
+            CacheEntry& cache) const;
+
         void calcGeodesic(
             const GeodesicInitialConditions& g0,
             CacheEntry& cache) const;
@@ -313,6 +326,12 @@ private:
         return Value<PosInfo>::updDowncast(
             m_Subsystem.updCacheEntry(state, m_PosInfoIx));
     }
+
+    void calcGeodesicInGround(
+            const LocalGeodesic::LocalGeodesicInfo& geodesic_S,
+            const Transform& X_GS,
+            PosInfo& posInfo) const;
+
     void calcPosInfo(const State& state, PosInfo& posInfo) const;
 
     // TODO Required for accessing the cache variable?
