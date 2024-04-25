@@ -21,7 +21,7 @@ using GeodesicJacobian = Vec4;
 using PointVariation   = ContactGeometry::GeodesicPointVariation;
 using Variation        = ContactGeometry::GeodesicVariation;
 using LineSegment      = CableSpan::LineSegment;
-using Status           = CurveSegment::Impl::Status;
+using Status           = CurveSegment::Status;
 
 //==============================================================================
 //                                CONSTANTS
@@ -153,8 +153,9 @@ GeodesicInitialConditions GeodesicInitialConditions::CreateCorrected(
     const UnitVec3 t = KP.R().getAxisUnitVec(ContactGeometry::TangentAxis);
     g0.t             = t + cross(w, t);
 
-    Real dl = c[3];
-    g0.l    = l + dl;
+    // Take the length correction, and add to the current length.
+    Real dl = c[3]; // Length increment is the last correction element.
+    g0.l    = std::max(l + dl, 0.); // Clamp length to be nonnegative.
 
     return g0;
 }
@@ -237,7 +238,7 @@ const LocalGeodesicInfo& LocalGeodesic::calcInitialGeodesic(
 {
     // TODO is this correct?
     CacheEntry& cache = updPrevCacheEntry(s);
-    calcGeodesic(g0, cache);
+    shootNewGeodesic(g0, cache);
     updCacheEntry(s) = cache;
     m_Subsystem.markDiscreteVarUpdateValueRealized(s, m_CacheIx);
 }
@@ -265,7 +266,7 @@ void LocalGeodesic::applyGeodesicCorrection(const State& s, const Correction& c)
         GeodesicInitialConditions::CreateCorrected(g.KP, g.dKP, g.length, c);
 
     // Shoot the new geodesic.
-    calcGeodesic(g0, updCacheEntry(s));
+    shootNewGeodesic(g0, updCacheEntry(s));
 }
 
 size_t LocalGeodesic::calcPathPoints(const State& s, std::vector<Vec3>& points) const
@@ -285,7 +286,7 @@ size_t LocalGeodesic::calcPathPoints(const State& s, std::vector<Vec3>& points) 
 //------------------------------------------------------------------------------
 //                               PRIVATE METHODS
 //------------------------------------------------------------------------------
-void LocalGeodesic::calcGeodesic(
+void LocalGeodesic::shootNewGeodesic(
     const GeodesicInitialConditions& g0,
     CacheEntry& cache) const
 {
@@ -374,7 +375,7 @@ void LocalGeodesic::calcTouchdownIfNeeded(
                 prev_QS,
                 next_PS,
                 cache.trackingPointOnLine);
-    calcGeodesic(g0, cache);
+    shootNewGeodesic(g0, cache);
 }
 
 void LocalGeodesic::assertSurfaceBounds(
@@ -479,35 +480,39 @@ size_t CurveSegment::Impl::calcPathPoints(
     }
     return n;
 }
-void CurveSegment::Impl::calcGeodesicInGround(
+
+namespace
+{
+void xformSurfaceGeodesicToGround(
         const LocalGeodesicInfo& geodesic_S,
         const Transform& X_GS,
-        PosInfo& posInfo) const
+        CurveSegment::Impl::PosInfo& geodesic_G)
 {
-    posInfo.X_GS = X_GS;
+    geodesic_G.X_GS = X_GS;
 
     // Store the the local geodesic in ground frame.
-    posInfo.KP = X_GS.compose(geodesic_S.KP);
-    posInfo.KQ = X_GS.compose(geodesic_S.KQ);
+    geodesic_G.KP = X_GS.compose(geodesic_S.KP);
+    geodesic_G.KQ = X_GS.compose(geodesic_S.KQ);
 
-    posInfo.dKP[0] = X_GS.R() * geodesic_S.dKP[0];
-    posInfo.dKP[1] = X_GS.R() * geodesic_S.dKP[1];
+    geodesic_G.dKP[0] = X_GS.R() * geodesic_S.dKP[0];
+    geodesic_G.dKP[1] = X_GS.R() * geodesic_S.dKP[1];
 
-    posInfo.dKQ[0] = X_GS.R() * geodesic_S.dKQ[0];
-    posInfo.dKQ[1] = X_GS.R() * geodesic_S.dKQ[1];
+    geodesic_G.dKQ[0] = X_GS.R() * geodesic_S.dKQ[0];
+    geodesic_G.dKQ[1] = X_GS.R() * geodesic_S.dKQ[1];
 
     // TODO use SpatialVec for variation.
     /* for (size_t i = 0; i < GeodesicDOF; ++i) { */
-    /*     posInfo.dKP[i][0] = X_GS.xformFrameVecToBase(geodesic_S.dKP[i][0]) */
-    /*     posInfo.dKP[i][1] = X_GS.xformFrameVecToBase(geodesic_S.dKP[i][1]) */
+    /*     geodesic_G.dKP[i][0] = X_GS.xformFrameVecToBase(geodesic_S.dKP[i][0]) */
+    /*     geodesic_G.dKP[i][1] = X_GS.xformFrameVecToBase(geodesic_S.dKP[i][1]) */
 
-    /*     posInfo.dKQ[i][0] = X_GS.xformFrameVecToBase(geodesic_S.dKQ[i][0]) */
-    /*     posInfo.dKQ[i][1] = X_GS.xformFrameVecToBase(geodesic_S.dKQ[i][1]) */
+    /*     geodesic_G.dKQ[i][0] = X_GS.xformFrameVecToBase(geodesic_S.dKQ[i][0]) */
+    /*     geodesic_G.dKQ[i][1] = X_GS.xformFrameVecToBase(geodesic_S.dKQ[i][1]) */
     /* } */
 
-    posInfo.length = geodesic_S.length;
+    geodesic_G.length = geodesic_S.length;
 
     throw std::runtime_error("NOTYETIMPLEMENTED: Check transformation order");
+}
 }
 
 void CurveSegment::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
@@ -517,8 +522,7 @@ void CurveSegment::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
     }
 
     // Compute tramsform from local surface frame to ground.
-    const Transform& X_GS = posInfo.X_GS =
-        m_Mobod.getBodyTransform(s).compose(m_Offset);
+    const Transform& X_GS = calcSurfaceFrameInGround(s);
 
     // Get the path points before and after this segment.
     const Vec3 prev_G = m_Path.getImpl().findPrevPoint(s, m_Index);
@@ -535,7 +539,37 @@ void CurveSegment::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         m_Surface.calcLocalGeodesicInfo(s, prev_S, next_S);
 
     // Store the the local geodesic in ground frame.
-    calcGeodesicInGround(geodesic_S, X_GS, updPosInfo(s));
+    xformSurfaceGeodesicToGround(geodesic_S, X_GS, updPosInfo(s));
+}
+
+SpatialVec CurveSegment::Impl::calcAppliedWrenchInGround(const State& s, Real tension) const
+{
+    const PosInfo& posInfo = getPosInfo(s);
+
+    const UnitVec3& t_P = posInfo.KP.R().getAxisUnitVec(TangentAxis);
+    const UnitVec3& t_Q = posInfo.KQ.R().getAxisUnitVec(TangentAxis);
+    const Vec3 F_G = tension * (t_Q - t_P);
+
+    const Vec3 x_GS = posInfo.X_GS.p();
+    const Vec3& r_P = posInfo.KP.p() - x_GS;
+    const Vec3& r_Q = posInfo.KQ.p() - x_GS;
+    const Vec3 M_G = tension * (r_Q % t_Q - r_P % t_P);
+    return {M_G, F_G};
+}
+
+void CurveSegment::Impl::applyBodyForce(
+        const State& s,
+        Real tension,
+        Vector_<SpatialVec>& bodyForcesInG) const
+{
+    // TODO why?
+    if (tension <= 0) {return;}
+
+    if (getStatus(s) != Status::Ok) {
+        return;
+    }
+
+    m_Mobod.applyBodyForce(s, calcAppliedWrenchInGround(s, tension), bodyForcesInG);
 }
 
 //==============================================================================
@@ -886,36 +920,43 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 
         // Grab the shared data cache for computing the matrices, and lock it.
         SolverDataCache& dataCache = findDataCache(nActive);
-        dataCache.lock();
-        SolverData& data = dataCache.updData();
+        try {
+            dataCache.lock();
 
-        // Compute the straight-line segments.
-        calcLineSegments(s, x_O, x_I, data.lineSegments);
+            SolverData& data = dataCache.updData();
 
-        // Evaluate path error, and stop when converged.
-        calcPathErrorVector<2>(s, data.lineSegments, axes, data.pathError);
-        const Real maxPathError = data.pathError.normInf();
-        if (maxPathError < m_PathErrorBound) {
-            return;
-        }
+            // Compute the straight-line segments.
+            calcLineSegments(s, x_O, x_I, data.lineSegments);
 
-        // Evaluate the path error jacobian.
-        calcPathErrorJacobian<2>(
-            s,
-            data.lineSegments,
-            axes,
-            data.pathErrorJacobian);
-
-        // Compute path corrections.
-        const Correction* corrIt = calcPathCorrections(data);
-
-        // Apply path corrections.
-        for (const CurveSegment& obstacle : m_CurveSegments) {
-            if (!obstacle.getImpl().isActive(s)) {
-                continue;
+            // Evaluate path error, and stop when converged.
+            calcPathErrorVector<2>(s, data.lineSegments, axes, data.pathError);
+            const Real maxPathError = data.pathError.normInf();
+            if (maxPathError < m_PathErrorBound) {
+                return;
             }
-            obstacle.getImpl().applyGeodesicCorrection(s, *corrIt);
-            ++corrIt;
+
+            // Evaluate the path error jacobian.
+            calcPathErrorJacobian<2>(
+                    s,
+                    data.lineSegments,
+                    axes,
+                    data.pathErrorJacobian);
+
+            // Compute path corrections.
+            const Correction* corrIt = calcPathCorrections(data);
+
+            // Apply path corrections.
+            for (const CurveSegment& obstacle : m_CurveSegments) {
+                if (!obstacle.getImpl().isActive(s)) {
+                    continue;
+                }
+                obstacle.getImpl().applyGeodesicCorrection(s, *corrIt);
+                ++corrIt;
+            }
+
+        } catch (const std::exception& e) {
+            dataCache.unlock();
+            throw e;
         }
 
         // Release the lock on the shared data.
@@ -968,12 +1009,20 @@ void CableSpan::Impl::calcVelInfo(const State& s, VelInfo& velInfo) const
 
     lengthDot += dot(e_G, v_GP - v_GQ);
 }
+
 void CableSpan::Impl::applyBodyForces(
-    const State& state,
+    const State& s,
     Real tension,
     Vector_<SpatialVec>& bodyForcesInG) const
 {
-    throw std::runtime_error("NOTYETIMPLEMENTED");
+    // TODO why?
+    if (tension <= 0) {return;}
+
+    realizePosition(s);
+
+    for (const CurveSegment& segment: m_CurveSegments) {
+        segment.getImpl().applyBodyForce(s, tension, bodyForcesInG);
+    }
 }
 
 //==============================================================================

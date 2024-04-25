@@ -43,14 +43,6 @@ public:
         ContactGeometry geometry,
         Vec3 initPointGuess);
 
-    // The status of this curve segment in relation to the surface it wraps over.
-    enum class Status
-    {
-        Ok,
-        Liftoff,
-        Disabled,
-    };
-
     //==============================================================================
     //                      ???
     //==============================================================================
@@ -131,19 +123,31 @@ public:
         const LocalGeodesicInfo& calcInitialGeodesic(
             State& s,
             const GeodesicInitialConditions& g0) const;
+
+        // This will reevaluate the cached geodesic and status.
+        // This will be called by the curve segment before updating the
+        // position level cache variable of the CurveSegment.
+        // TODO Unfortunate naming convention.
         const LocalGeodesicInfo& calcLocalGeodesicInfo(
             const State& s,
             Vec3 prev_QS,
             Vec3 next_PS) const; // TODO weird name
-        void applyGeodesicCorrection(const State& s, const Correction& c) const;
-        size_t calcPathPoints(const State& state, std::vector<Vec3>& points)
-            const;
 
-        // The user defined point that controls the initial wrapping path.
+        // Apply the correction to the initial condition of the geodesic, and
+        // shoot a new geodesic, updating the cache variable.
+        void applyGeodesicCorrection(const State& s, const Correction& c) const;
+
+        // Compute the path points of the current geodesic, and write them to the buffer.
+        // These points are in local surface coordinates. Returns the number of points written.
+        size_t calcPathPoints(const State& state, std::vector<Vec3>& points) const;
+
+        // Set the user defined point that controls the initial wrapping path.
         void setInitialPointGuess(Vec3 initPointGuess)
         {
             m_InitPointGuess = initPointGuess;
         }
+
+        // Get the user defined point that controls the initial wrapping path.
         Vec3 getInitialPointGuess() const
         {
             return m_InitPointGuess;
@@ -210,7 +214,7 @@ public:
             const Vec3& next_PS,
             CacheEntry& cache) const;
 
-        void calcGeodesic(
+        void shootNewGeodesic(
             const GeodesicInitialConditions& g0,
             CacheEntry& cache) const;
 
@@ -243,8 +247,6 @@ public:
         // TODO add force & moment here?
         /* Vec3 unitForce {}; */
         /* Vec3 unitMoment {}; */
-
-        Status status = Status::Ok;
     };
 
     // Allocate state variables and cache entries.
@@ -264,6 +266,7 @@ public:
     {
         return m_Index;
     }
+
     void setIndex(CurveSegmentIndex ix)
     {
         m_Index = ix;
@@ -278,17 +281,20 @@ public:
 
     bool isActive(const State& s) const
     {
-        return getPosInfo(s).status == Status::Ok;
+        return m_Surface.getStatus(s) == Status::Ok;
     }
+
     Status getStatus(const State& s) const
     {
         return m_Surface.getStatus(s);
     }
 
     void calcInitZeroLengthGeodesic(State& state, Vec3 prev_QS) const;
+
     void applyGeodesicCorrection(
         const State& state,
         const ContactGeometry::GeodesicCorrection& c) const;
+
     size_t calcPathPoints(const State& state, std::vector<Vec3>& points) const;
 
     /* const MobilizedBody& getMobilizedBody() const {return m_Mobod;} */
@@ -317,6 +323,19 @@ public:
         v_GQ = v_BG + w_BG % r_Q;
     }
 
+    Transform calcSurfaceFrameInGround(const State& s) const
+    {
+        return m_Mobod.getBodyTransform(s).compose(m_Offset);
+    }
+
+    SpatialVec calcAppliedWrenchInGround(const State& s, Real tension) const;
+
+    // TODO Force? or wrench?
+    void applyBodyForce(
+        const State& state,
+        Real tension,
+        Vector_<SpatialVec>& bodyForcesInG) const;
+
     // TODO allow for user to shoot his own geodesic.
     /* void calcGeodesic(State& state, Vec3 x, Vec3 t, Real l) const; */
 
@@ -326,11 +345,6 @@ private:
         return Value<PosInfo>::updDowncast(
             m_Subsystem.updCacheEntry(state, m_PosInfoIx));
     }
-
-    void calcGeodesicInGround(
-            const LocalGeodesic::LocalGeodesicInfo& geodesic_S,
-            const Transform& X_GS,
-            PosInfo& posInfo) const;
 
     void calcPosInfo(const State& state, PosInfo& posInfo) const;
 
