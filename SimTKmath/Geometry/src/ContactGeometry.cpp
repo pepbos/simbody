@@ -268,6 +268,11 @@ bool ContactGeometry::calcNearestPointOnLineAnalytically(
 //                            IMPLICIT METHODS
 //==============================================================================
 
+// TODO is this right?
+static const CoordinateAxis TangentAxis = CoordinateAxis::XCoordinateAxis();
+static const CoordinateAxis NormalAxis = CoordinateAxis::YCoordinateAxis();
+static const CoordinateAxis BinormalAxis = CoordinateAxis::ZCoordinateAxis();
+
 size_t ContactGeometryImpl::calcNearestFrenetFrameImplicitlyFast(
         Vec3 xGuess,
         Vec3 tGuess,
@@ -291,16 +296,16 @@ size_t ContactGeometryImpl::calcNearestFrenetFrameImplicitlyFast(
         x += -g * c / dot(g,g);
     }
 
-    Vec3 n = calcSurfaceGradient(x);
+    UnitVec3 n (calcSurfaceGradient(x));
     Vec3& t = tGuess;
     if (!(abs(t % n) > 1e-13)) {
         // TODO split NaN detection.
         throw std::runtime_error("Surface projection failed: Tangent guess is parallel to surface normal, or there are NaNs...");
     }
 
-    t = t - dot(n, t) * n / dot(n,n);
+    t = t - dot(n, t) * n;
 
-    K_P.updR().setRotationFromTwoAxes(n / n.norm(), NormalAxis, t, TangentAxis);
+    K_P.updR().setRotationFromTwoAxes(n, NormalAxis, t, TangentAxis);
     K_P.setP(x);
 
     return it;
@@ -308,9 +313,28 @@ size_t ContactGeometryImpl::calcNearestFrenetFrameImplicitlyFast(
 
 void ContactGeometryImpl::calcGeodesicStartFrameVariationImplicitly(
         const FrenetFrame& K_P,
-        GeodesicVariation& dK_P) const
-{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, 
-        "ContactGeometryImpl", "calcGeodesicStartFrameVariationImplicitly"); }
+        std::array<SpatialVec, 4>& dK_P) const
+{
+    const UnitVec3& t = K_P.R().getAxisUnitVec(TangentAxis);
+    const UnitVec3& n = K_P.R().getAxisUnitVec(NormalAxis);
+    const UnitVec3& b = K_P.R().getAxisUnitVec(BinormalAxis);
+
+    const Vec3& x = K_P.p();
+
+    dK_P.at(0)[1] = t;
+    dK_P.at(1)[1] = b; //  * q.a; // a = 1
+    dK_P.at(2)[1] = Vec3{0.}; // b * q.r; // r = 0
+    dK_P.at(3)[1] = Vec3{0.}; // isEnd ? t : Vec3{0., 0., 0.};
+
+    const double tau_g   = calcGeodesicTorsion(x, t);
+    const double kappa_n = calcNormalCurvature(x, t);
+    const double kappa_a = calcNormalCurvature(x, b);
+
+    dK_P.at(0)[0] = tau_g * t +  kappa_n * b;
+    dK_P.at(1)[0] = -kappa_a * t - tau_g * b;
+    dK_P.at(2)[0] = -n;
+    dK_P.at(3)[0] = Vec3{0.};
+}
 
 void ContactGeometryImpl::calcGeodesicEndFrameVariationImplicitly(
         const FrenetFrame& KP,

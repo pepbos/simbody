@@ -158,6 +158,13 @@ public:
     {   SimTK_THROW2(Exception::UnimplementedVirtualMethod, 
         "ContactGeometryImpl", "calcNearestPointOnLineAnalytically"); }
 
+    Real calcNormalCurvature(Vec3 x, UnitVec3 t) const
+    {   SimTK_THROW2(Exception::UnimplementedVirtualMethod, 
+        "ContactGeometryImpl", "calcNormalCurvature"); }
+    Real calcGeodesicTorsion(Vec3 x, UnitVec3 t) const
+    {   SimTK_THROW2(Exception::UnimplementedVirtualMethod, 
+        "ContactGeometryImpl", "calcGeodesicTorsion"); }
+
     // Smooth surfaces only.
     virtual void calcCurvature(const Vec3& point, Vec2& curvature, 
                        Rotation& orientation) const

@@ -127,6 +127,16 @@ static constexpr int GEODESIC_DOF = 4;
 using FrenetFrame = Transform;
 using GeodesicPointVariation = Mat34;
 using GeodesicFrameVariation = Mat34;
+
+// Variation as SpatialVec:
+//
+// {dR, dx} = {W*R, v}
+//
+// dx = v
+// dt = w % t
+// dn = w % n
+// db = w % b
+// dR = W * R
 using GeodesicVariation = std::array<Mat34, 2>;
 using GeodesicCorrection = Vec4;
 
@@ -186,6 +196,9 @@ bool calcNearestPointOnLineAnalytically(
     Vec3 a,
     Vec3 b,
     Vec3& point) const;
+
+Real calcNormalCurvature(Vec3 x, UnitVec3 t) const;
+Real calcGeodesicTorsion(Vec3 x, UnitVec3 t) const;
 
 // TODO
 class Cone;
