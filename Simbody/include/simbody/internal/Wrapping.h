@@ -15,8 +15,8 @@
 namespace SimTK
 {
 
-SimTK_DEFINE_UNIQUE_INDEX_TYPE(WrappingPathIndex);
-SimTK_DEFINE_UNIQUE_INDEX_TYPE(WrapObstacleIndex);
+SimTK_DEFINE_UNIQUE_INDEX_TYPE(CurveSegmentIndex);
+SimTK_DEFINE_UNIQUE_INDEX_TYPE(CableSpanIndex);
 
 class MultibodySystem;
 class CableSubsystem;
@@ -31,19 +31,18 @@ class SimTK_SIMBODY_EXPORT CurveSegment
 {
 public:
     CurveSegment()                                   = default;
-    CurveSegment(const CurveSegment&)                = delete;
-    CurveSegment& operator=(const CurveSegment&)     = delete;
+    CurveSegment(const CurveSegment&)                = default;
+    CurveSegment& operator=(const CurveSegment&)     = default;
     CurveSegment(CurveSegment&&) noexcept            = default;
     CurveSegment& operator=(CurveSegment&&) noexcept = default;
     ~CurveSegment()                                  = default;
 
     CurveSegment(
+        CableSpan cable,
         const MobilizedBody& mobod,
         Transform X_BS,
         const ContactGeometry& geometry,
         Vec3 xHint);
-
-    class Impl;
 
     enum class Status
     {
@@ -53,36 +52,33 @@ public:
     };
 
     Real getSegmentLength(const State& s);
-    /* { */
-    /*     getImpl().getSubsystem().realizePosition(s); */
-    /*     return getImpl().getLength(s); */
-    /* } */
 
     Status getStatus(const State& state) const;
-    void setDisabled(const State& state) const;
-    void setEnabled(const State& state) const;
 
-    const MobilizedBody& getMobilizedBody(const State& state) const;
+    // TODO seems useful:
+    /* void setDisabled(const State& state) const; */
+    /* void setEnabled(const State& state) const; */
 
-    int calcSegmentPoints(const State& state, std::vector<Vec3>& points);
-    int calcSegmentFrenetFrames(
-        const State& state,
-        std::vector<ContactGeometry::FrenetFrame>& frames);
+    /* const MobilizedBody& getMobilizedBody(const State& state) const; */
+
+    /* int calcSegmentPoints(const State& state, std::vector<Vec3>& points); */
+    /* int calcSegmentFrenetFrames( */
+    /*     const State& state, */
+    /*     std::vector<ContactGeometry::FrenetFrame>& frames); */
+
+    class Impl;
 
 private:
-    explicit CurveSegment(std::unique_ptr<Impl> impl);
-
     friend CableSpan;
-    const Impl& getImpl() const;
-    Impl& updImpl();
+    const Impl& getImpl() const {return *m_Impl;}
+    Impl& updImpl() {return *m_Impl;}
 
-    std::unique_ptr<Impl> impl;
+    std::shared_ptr<Impl> m_Impl = nullptr;
 };
 
 //==============================================================================
-//                          PATH - or SPAN
+//                          CABLE SPAN
 //==============================================================================
-// Cable, wire, rope, cord
 class SimTK_SIMBODY_EXPORT CableSpan
 {
 public:
@@ -99,6 +95,8 @@ public:
         const Vec3& defaultOriginPoint,
         const MobilizedBody& terminationBody,
         const Vec3& defaultTerminationPoint);
+
+    CurveSegmentIndex adoptSegment(const CurveSegment& segment);
 
     std::vector<CurveSegment>& updObstacles();
     const std::vector<CurveSegment>& getObstacles();
@@ -119,18 +117,18 @@ public:
     class Impl;
 
 private:
-    explicit CableSpan(std::unique_ptr<Impl> impl);
+    explicit CableSpan(std::unique_ptr<Impl> m_Impl);
 
     const Impl& getImpl() const
     {
-        return *impl;
+        return *m_Impl;
     }
     Impl& updImpl()
     {
-        return *impl;
+        return *m_Impl;
     }
 
-    std::shared_ptr<Impl> impl = nullptr;
+    std::shared_ptr<Impl> m_Impl = nullptr;
 
     friend CurveSegment::Impl;
     friend CableSubsystem;
@@ -148,8 +146,8 @@ public:
     explicit CableSubsystem(MultibodySystem&);
 
     int getNumPaths() const;
-    const CableSpan& getPath(WrappingPathIndex idx) const;
-    CableSpan& updPath(WrappingPathIndex idx);
+    const CableSpan& getPath(CableSpanIndex idx) const;
+    CableSpan& updPath(CableSpanIndex idx);
 
     size_t writePathPoints(std::vector<Vec3>& points) const;
     size_t writePathFrames(std::vector<Transform>& frenetFrames) const;

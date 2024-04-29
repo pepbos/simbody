@@ -7,6 +7,7 @@
 #include "simmath/internal/ContactGeometry.h"
 #include <cstddef>
 #include <stdexcept>
+#include <memory>
 
 using namespace SimTK;
 
@@ -437,7 +438,39 @@ void LocalGeodesic::calcCacheEntry(
 }
 
 //==============================================================================
-//                               OBSTACLE
+//                               CURVE SEGMENT
+//==============================================================================
+
+CurveSegment::CurveSegment(
+        CableSpan cable,
+        const MobilizedBody& mobod,
+        Transform X_BS,
+        const ContactGeometry& geometry,
+        Vec3 xHint)
+    : m_Impl(std::shared_ptr<CurveSegment::Impl>(new CurveSegment::Impl(cable, mobod, X_BS, geometry, xHint)))
+{
+    updImpl().setIndex(cable.adoptSegment(*this));
+}
+
+const CableSpan& CurveSegment::getCable() const
+{
+    return getImpl().getCable();
+}
+
+Real CurveSegment::getSegmentLength(const State& s)
+{
+    getImpl().realizeCablePosition(s);
+    return getImpl().getPosInfo(s).length;
+}
+
+CurveSegment::Status CurveSegment::getStatus(const State& s) const
+{
+    getImpl().realizeCablePosition(s);
+    return getImpl().getStatus(s);
+}
+
+//==============================================================================
+//                          CURVE SEGMENT IMPL
 //==============================================================================
 
 CurveSegment::Impl::Impl(

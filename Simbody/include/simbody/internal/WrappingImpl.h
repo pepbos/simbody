@@ -15,33 +15,16 @@
 namespace SimTK
 {
 
-SimTK_DEFINE_UNIQUE_INDEX_TYPE(CurveSegmentIndex);
-SimTK_DEFINE_UNIQUE_INDEX_TYPE(PathIndex);
-
 //==============================================================================
 //                                ??? IMPL
 //==============================================================================
 class CurveSegment::Impl
 {
+    public:
+
     using FrenetFrame = ContactGeometry::FrenetFrame;
     using Variation   = ContactGeometry::GeodesicVariation;
     using Correction  = ContactGeometry::GeodesicCorrection;
-
-private:
-    Impl() = default;
-
-public:
-    Impl(const Impl& source)            = default;
-    Impl& operator=(const Impl& source) = default;
-    ~Impl()                             = default;
-
-    Impl(
-        CableSpan cable,
-        CurveSegmentIndex ix,
-        const MobilizedBody& mobod,
-        const Transform& X_BS,
-        ContactGeometry geometry,
-        Vec3 initPointGuess);
 
     //==============================================================================
     //                      ???
@@ -245,6 +228,22 @@ public:
         DiscreteVariableIndex m_CacheIx;
     };
 
+private:
+    Impl() = default;
+
+public:
+    Impl(const Impl& source)            = default;
+    Impl& operator=(const Impl& source) = default;
+    ~Impl()                             = default;
+
+    Impl(
+            CableSpan path,
+            CurveSegmentIndex ix,
+            const MobilizedBody& mobod,
+            const Transform& X_BS,
+            ContactGeometry geometry,
+            Vec3 initPointGuess);
+
     // Position level cache: Curve in ground frame.
     struct PosInfo
     {
@@ -267,13 +266,21 @@ public:
     void realizeTopology(State& state);
     /* void realizeInstance(const State& state) const; */
     void realizePosition(const State& state) const;
+
     /* void realizeVelocity(const State& state) const; */
     /* void realizeAcceleration(const State& state) const; */
     /* void invalidateTopology(); */
 
+    void realizeCablePosition(const State& state) const;
+
     void invalidatePositionLevelCache(const State& state) const
     {
         m_Subsystem.markCacheValueNotRealized(state, m_PosInfoIx);
+    }
+
+    const CableSpan& getCable() const
+    {
+        return m_Path;
     }
 
     CurveSegmentIndex getIndex() const
@@ -542,21 +549,21 @@ public:
         return cables.size();
     }
 
-    const CableSpan& getCablePath(WrappingPathIndex index) const
+    const CableSpan& getCablePath(CableSpanIndex index) const
     {
         return cables[index];
     }
 
-    CableSpan& updCablePath(WrappingPathIndex index)
+    CableSpan& updCablePath(CableSpanIndex index)
     {
         return cables[index];
     }
 
     // Add a cable path to the list, bumping the reference count.
-    WrappingPathIndex adoptCablePath(CableSpan& path)
+    CableSpanIndex adoptCablePath(CableSpan& path)
     {
         cables.push_back(path);
-        return WrappingPathIndex(cables.size() - 1);
+        return CableSpanIndex(cables.size() - 1);
     }
 
     // Return the MultibodySystem which owns this WrappingPathSubsystem.
@@ -579,7 +586,7 @@ public:
         // Topology cache is const.
         Impl* wThis = const_cast<Impl*>(this);
 
-        for (WrappingPathIndex ix(0); ix < cables.size(); ++ix) {
+        for (CableSpanIndex ix(0); ix < cables.size(); ++ix) {
             CableSpan& path = wThis->updCablePath(ix);
             path.updImpl().realizeTopology(state);
         }
@@ -589,7 +596,7 @@ public:
 
     int realizeSubsystemPositionImpl(const State& state) const override
     {
-        for (WrappingPathIndex ix(0); ix < cables.size(); ++ix) {
+        for (CableSpanIndex ix(0); ix < cables.size(); ++ix) {
             const CableSpan& path = getCablePath(ix);
             path.getImpl().realizePosition(state);
         }
@@ -598,7 +605,7 @@ public:
 
     int realizeSubsystemVelocityImpl(const State& state) const override
     {
-        for (WrappingPathIndex ix(0); ix < cables.size(); ++ix) {
+        for (CableSpanIndex ix(0); ix < cables.size(); ++ix) {
             const CableSpan& path = getCablePath(ix);
             path.getImpl().realizeVelocity(state);
         }
@@ -609,7 +616,7 @@ public:
 
 private:
     // TOPOLOGY STATE
-    Array_<CableSpan, WrappingPathIndex> cables;
+    Array_<CableSpan, CableSpanIndex> cables;
 };
 
 } // namespace SimTK
