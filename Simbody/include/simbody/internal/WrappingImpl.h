@@ -258,10 +258,6 @@ public:
         Variation dKQ{};
 
         Real length = NaN;
-
-        // TODO add force & moment here?
-        /* Vec3 unitForce {}; */
-        /* Vec3 unitMoment {}; */
     };
 
     // Allocate state variables and cache entries.
@@ -269,16 +265,9 @@ public:
     /* void realizeInstance(const State& state) const; */
     void realizePosition(const State& state) const;
 
-    /* void realizeVelocity(const State& state) const; */
-    /* void realizeAcceleration(const State& state) const; */
-    /* void invalidateTopology(); */
-
     void realizeCablePosition(const State& state) const;
 
-    void invalidatePositionLevelCache(const State& state) const
-    {
-        m_Subsystem.markCacheValueNotRealized(state, m_PosInfoIx);
-    }
+    void invalidatePositionLevelCache(const State& state) const;
 
     const CableSpan& getCable() const
     {
@@ -447,11 +436,12 @@ public:
     {
         m_Subsystem.invalidateSubsystemTopologyCache();
     }
+    void invalidatePositionLevelCache(const State& state) const;
 
     const PosInfo& getPosInfo(const State& state) const;
     const VelInfo& getVelInfo(const State& state) const;
 
-    void calcInitZeroLengthGeodesic(State& s) const;
+    void calcInitCablePath(State& s) const;
 
     void applyBodyForces(
         const State& state,

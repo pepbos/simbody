@@ -1055,6 +1055,17 @@ void CurveSegment::Impl::realizePosition(const State& s) const
     }
 }
 
+void CurveSegment::Impl::realizeCablePosition(const State& s) const
+{
+    m_Path.getImpl().realizePosition(s);
+}
+
+void CurveSegment::Impl::invalidatePositionLevelCache(const State& state) const
+{
+    m_Subsystem.markCacheValueNotRealized(state, m_PosInfoIx);
+    m_Path.getImpl().invalidatePositionLevelCache(state);
+}
+
 void CurveSegment::Impl::calcInitZeroLengthGeodesic(State& s, Vec3 prev_QG)
     const
 {
@@ -1069,7 +1080,7 @@ void CurveSegment::Impl::calcInitZeroLengthGeodesic(State& s, Vec3 prev_QG)
         GeodesicInitialConditions::CreateZeroLengthGuess(prev_QS, xGuess_S);
     m_Geodesic.calcInitialGeodesic(s, g0);
 
-    m_Subsystem.markCacheValueNotRealized(s, m_PosInfoIx);
+    invalidatePositionLevelCache(s);
 }
 
 void CurveSegment::Impl::applyGeodesicCorrection(
@@ -1080,7 +1091,7 @@ void CurveSegment::Impl::applyGeodesicCorrection(
     m_Geodesic.applyGeodesicCorrection(s, c);
 
     // Invalidate position level cache.
-    m_Subsystem.markCacheValueNotRealized(s, m_PosInfoIx);
+    invalidatePositionLevelCache(s);
 }
 
 void CurveSegment::Impl::calcPathPoints(
@@ -1331,6 +1342,11 @@ void CableSpan::Impl::realizeVelocity(const State& s) const
     m_Subsystem.markCacheValueRealized(s, m_VelInfoIx);
 }
 
+void CableSpan::Impl::invalidatePositionLevelCache(const State& s) const
+{
+    m_Subsystem.markCacheValueNotRealized(s, m_PosInfoIx);
+}
+
 const CableSpan::Impl::PosInfo& CableSpan::Impl::getPosInfo(
     const State& s) const
 {
@@ -1357,7 +1373,7 @@ CableSpan::Impl::VelInfo& CableSpan::Impl::updVelInfo(const State& s) const
         m_Subsystem.updCacheEntry(s, m_VelInfoIx));
 }
 
-void CableSpan::Impl::calcInitZeroLengthGeodesic(State& s) const
+void CableSpan::Impl::calcInitCablePath(State& s) const
 {
     Vec3 prev_QG =
         m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
