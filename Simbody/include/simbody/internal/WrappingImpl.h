@@ -228,17 +228,15 @@ class CurveSegment::Impl
         DiscreteVariableIndex m_CacheIx;
     };
 
-private:
-    Impl() = default;
-
 public:
-    Impl(const Impl& source)            = default;
-    Impl& operator=(const Impl& source) = default;
+    Impl()                              = delete;
+    Impl(const Impl& source)            = delete;
+    Impl& operator=(const Impl& source) = delete;
     ~Impl()                             = default;
 
+    // TODO you would expect the constructor to take the index as well here?
     Impl(
             CableSpan path,
-            CurveSegmentIndex ix,
             const MobilizedBody& mobod,
             const Transform& X_BS,
             ContactGeometry geometry,
@@ -414,7 +412,7 @@ public:
         return m_CurveSegments[ix];
     }
 
-    CurveSegmentIndex adoptObstacle(CurveSegment& segment)
+    CurveSegmentIndex adoptSegment(const CurveSegment& segment)
     {
         m_CurveSegments.push_back(segment);
         return CurveSegmentIndex(m_CurveSegments.size() - 1);

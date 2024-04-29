@@ -51,6 +51,9 @@ public:
         Disabled,
     };
 
+    // TODO remove? keep? make private?
+    const CableSpan& getCable() const;
+
     Real getSegmentLength(const State& s);
 
     Status getStatus(const State& state) const;
@@ -98,8 +101,9 @@ public:
 
     CurveSegmentIndex adoptSegment(const CurveSegment& segment);
 
-    std::vector<CurveSegment>& updObstacles();
-    const std::vector<CurveSegment>& getObstacles();
+    int getNumCurveSegments() const;
+
+    const CurveSegment& getCurveSegment(CurveSegmentIndex ix) const;
 
     Real getLength(const State& state) const;
     Real getLengthDot(const State& state) const;
@@ -109,20 +113,19 @@ public:
         Real tension,
         Vector_<SpatialVec>& bodyForcesInG) const;
 
-    int calcPathPoints(const State& state, std::vector<Vec3>& points);
-    int calcPathFrenetFrames(
-        const State& state,
-        std::vector<ContactGeometry::FrenetFrame>& frames);
+    /* int calcPathPoints(const State& state, std::vector<Vec3>& points); */
+    /* int calcPathFrenetFrames( */
+    /*     const State& state, */
+    /*     std::vector<ContactGeometry::FrenetFrame>& frames); */
 
     class Impl;
 
 private:
-    explicit CableSpan(std::unique_ptr<Impl> m_Impl);
-
     const Impl& getImpl() const
     {
         return *m_Impl;
     }
+
     Impl& updImpl()
     {
         return *m_Impl;

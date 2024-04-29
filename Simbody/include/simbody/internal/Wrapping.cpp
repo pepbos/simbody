@@ -475,13 +475,13 @@ CurveSegment::Status CurveSegment::getStatus(const State& s) const
 
 CurveSegment::Impl::Impl(
     CableSpan path,
-    CurveSegmentIndex ix,
     const MobilizedBody& mobod,
     const Transform& X_BS,
     ContactGeometry geometry,
     Vec3 initPointGuess) :
     m_Subsystem(path.getImpl().getSubsystem()),
-    m_Path(path), m_Index(ix), m_Mobod(mobod), m_Offset(X_BS),
+    m_Path(path), m_Index(-1), // TODO what to do with this index, and when
+    m_Mobod(mobod), m_Offset(X_BS),
     m_Surface(m_Subsystem, geometry, initPointGuess)
 {}
 
@@ -693,7 +693,56 @@ GeodesicJacobian addPathErrorJacobian(
 } // namespace
 
 //==============================================================================
-//                                PATH IMPL
+//                                CABLE SPAN
+//==============================================================================
+
+CableSpan::CableSpan(
+        CableSubsystem& subsystem,
+        const MobilizedBody& originBody,
+        const Vec3& defaultOriginPoint,
+        const MobilizedBody& terminationBody,
+        const Vec3& defaultTerminationPoint) :
+    m_Impl(std::shared_ptr<Impl>(new Impl(
+        subsystem,
+        originBody,
+        defaultOriginPoint,
+        terminationBody,
+        defaultTerminationPoint))) {}
+
+CurveSegmentIndex CableSpan::adoptSegment(const CurveSegment& segment)
+{
+    return updImpl().adoptSegment(segment);
+}
+
+int CableSpan::getNumCurveSegments() const
+{
+    return getImpl().getNumCurveSegments();
+}
+
+const CurveSegment& CableSpan::getCurveSegment(CurveSegmentIndex ix) const
+{
+    return getImpl().getCurveSegment(ix);
+}
+
+Real CableSpan::getLength(const State& s) const
+{
+    return getImpl().getPosInfo(s).l;
+}
+
+Real CableSpan::getLengthDot(const State& s) const
+{
+    return getImpl().getVelInfo(s).lengthDot;
+}
+void CableSpan::applyBodyForces(
+        const State& s,
+        Real tension,
+        Vector_<SpatialVec>& bodyForcesInG) const
+{
+    return getImpl().applyBodyForces(s, tension, bodyForcesInG);
+}
+
+//==============================================================================
+//                              CABLE SPAN IMPL
 //==============================================================================
 
 void CableSpan::Impl::realizeTopology(State& s)
@@ -1145,14 +1194,14 @@ int CableSubsystem::getNumPaths() const
     return getImpl().getNumPaths();
 }
 
-const CableSpan& CableSubsystem::getPath(WrappingPathIndex cableIx) const
+const CableSpan& CableSubsystem::getPath(CableSpanIndex ix) const
 {
-    return getImpl().getCablePath(cableIx);
+    return getImpl().getCablePath(ix);
 }
 
-CableSpan& CableSubsystem::updPath(WrappingPathIndex cableIx)
+CableSpan& CableSubsystem::updPath(CableSpanIndex ix)
 {
-    return updImpl().updCablePath(cableIx);
+    return updImpl().updCablePath(ix);
 }
 
 //==============================================================================
