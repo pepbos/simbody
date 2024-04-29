@@ -641,10 +641,7 @@ void addDirectionJacobian(
     addBlock(~dx * y, J);
 }
 
-Real calcPathError(
-    const LineSegment& e,
-    const Rotation& R,
-    CoordinateAxis axis)
+Real calcPathError(const LineSegment& e, const Rotation& R, CoordinateAxis axis)
 {
     return dot(e.d, R.getAxisUnitVec(axis));
 }
@@ -1136,7 +1133,38 @@ struct ImplicitGeodesicState
 {
     ImplicitGeodesicState() = default;
 
+    explicit ImplicitGeodesicState(
+        Vec<10, Real>&& implicitGeodesicStateAsVector)
+    {
+        asVecMut() = implicitGeodesicStateAsVector;
+    }
+
     ImplicitGeodesicState(Vec3 point, Vec3 tangent) : x(point), t(tangent){};
+
+    const Vec<10, Real>& asVec() const
+    {
+        return reinterpret_cast<const Vec<10, Real>&>(x[0]);
+    }
+
+    Vec<10, Real>& asVecMut()
+    {
+        return reinterpret_cast<Vec<10, Real>&>(x[0]);
+    }
+
+    Vec<10, Real> calcDerivativeVector(
+        const Vec3& acceleration,
+        Real gaussianCurvature) const
+    {
+        ImplicitGeodesicState dy;
+        dy.x    = t;
+        dy.t    = acceleration;
+        dy.a    = aDot;
+        dy.aDot = -a * gaussianCurvature;
+        dy.r    = rDot;
+        dy.rDot = -r * gaussianCurvature;
+        return {dy.asVec()};
+        ;
+    }
 
     Vec3 x    = {NaN, NaN, NaN};
     Vec3 t    = {NaN, NaN, NaN};
@@ -1145,31 +1173,6 @@ struct ImplicitGeodesicState
     Real r    = 0.;
     Real rDot = 1.;
 };
-
-struct ImplicitGeodesicStateDerivative
-{
-    Vec3 xDot  = {NAN, NAN, NAN};
-    Vec3 tDot  = {NAN, NAN, NAN};
-    Real aDot  = NAN;
-    Real aDDot = NAN;
-    Real rDot  = NAN;
-    Real rDDot = NAN;
-};
-
-ImplicitGeodesicStateDerivative calcImplicitGeodesicStateDerivative(
-    const ImplicitGeodesicState& y,
-    const Vec3& acceleration,
-    Real gaussianCurvature)
-{
-    ImplicitGeodesicStateDerivative dy;
-    dy.xDot  = y.t;
-    dy.tDot  = acceleration;
-    dy.aDot  = y.aDot;
-    dy.aDDot = -y.a * gaussianCurvature;
-    dy.rDot  = y.rDot;
-    dy.rDDot = -y.r * gaussianCurvature;
-    return dy;
-}
 
 void calcSurfaceProjectionFast(
     const ContactGeometry& geometry,
@@ -1205,72 +1208,37 @@ void calcSurfaceProjectionFast(
     t = t / norm;
 }
 
-ImplicitGeodesicState operator*(
-    Real dt,
-    const ImplicitGeodesicStateDerivative& dy)
-{
-    ImplicitGeodesicState y;
-    y.x    = dt * dy.xDot;
-    y.t    = dt * dy.tDot;
-    y.a    = dt * dy.aDot;
-    y.aDot = dt * dy.aDDot;
-    y.r    = dt * dy.rDot;
-    y.rDot = dt * dy.rDDot;
-    return y;
-}
-
 ImplicitGeodesicState operator-(
     const ImplicitGeodesicState& lhs,
     const ImplicitGeodesicState& rhs)
 {
-    ImplicitGeodesicState y;
-    y.x    = lhs.x - rhs.x;
-    y.t    = lhs.t - rhs.t;
-    y.a    = lhs.a - rhs.a;
-    y.aDot = lhs.aDot - rhs.aDot;
-    y.r    = lhs.r - rhs.r;
-    y.rDot = lhs.rDot - rhs.rDot;
-    return y;
+    ImplicitGeodesicState out;
+    out.asVecMut() = lhs.asVec() - rhs.asVec();
+    return out;
 }
 
 ImplicitGeodesicState operator+(
     const ImplicitGeodesicState& lhs,
-    const ImplicitGeodesicState& rhs)
+    const Vec<10, Real>& rhs)
 {
-    ImplicitGeodesicState y;
-    y.x    = lhs.x + rhs.x;
-    y.t    = lhs.t + rhs.t;
-    y.a    = lhs.a + rhs.a;
-    y.aDot = lhs.aDot + rhs.aDot;
-    y.r    = lhs.r + rhs.r;
-    y.rDot = lhs.rDot + rhs.rDot;
-    return y;
+    ImplicitGeodesicState out;
+    out.asVecMut() = lhs.asVec() + rhs;
+    return out;
 }
 
-Real calcInfNorm(const ImplicitGeodesicState& q) {
+Real calcInfNorm(const ImplicitGeodesicState& q)
+{
     Real infNorm = 0.;
-
-    infNorm = std::max(infNorm, q.x[0]);
-    infNorm = std::max(infNorm, q.x[1]);
-    infNorm = std::max(infNorm, q.x[2]);
-
-    infNorm = std::max(infNorm, q.t[0]);
-    infNorm = std::max(infNorm, q.t[1]);
-    infNorm = std::max(infNorm, q.t[2]);
-
-    infNorm = std::max(infNorm, q.a);
-    infNorm = std::max(infNorm, q.aDot);
-
-    infNorm = std::max(infNorm, q.r);
-    infNorm = std::max(infNorm, q.rDot);
-
+    for (size_t r = 0; r < q.asVec().nrow(); ++r) {
+        infNorm = std::max(infNorm, q.asVec()[r]);
+    }
     return infNorm;
 }
 
 class RKM
 {
     using Y  = ImplicitGeodesicState;
-    using DY = ImplicitGeodesicStateDerivative;
+    using DY = Vec<10, Real>;
 
 public:
     RKM() = default;
@@ -1321,6 +1289,10 @@ private:
 Real RKM::step(Real h, std::function<DY(const Y&)>& f)
 {
     Y& yk = _y.at(1);
+
+    for (size_t i = 0; i < 5; ++i) {
+        yk = _y.at(0) + (h / 3.) * _k.at(0);
+    }
 
     // k1
     _k.at(0) = f(_y.at(0));
@@ -1497,7 +1469,7 @@ Real calcGaussianCurvature(const ContactGeometry& geometry, Vec3 point)
 {
     const Vec3& p = point;
     Vec3 g        = geometry.calcSurfaceGradient(p);
-    Real gDotg  = dot(g, g);
+    Real gDotg    = dot(g, g);
     Mat33 adj     = calcAdjoint(geometry.calcSurfaceHessian(p));
 
     if (gDotg * gDotg < 1e-13) {
@@ -1508,12 +1480,17 @@ Real calcGaussianCurvature(const ContactGeometry& geometry, Vec3 point)
     return (dot(g, adj * g)) / (gDotg * gDotg);
 }
 
-void calcFrenetFrame(const ContactGeometry& geometry, const ImplicitGeodesicState& q, FrenetFrame& K)
+void calcFrenetFrame(
+    const ContactGeometry& geometry,
+    const ImplicitGeodesicState& q,
+    FrenetFrame& K)
 {
     K.setP(q.x);
     K.updR().setRotationFromTwoAxes(
-            calcSurfaceNormal(geometry, q.x), NormalAxis,
-            q.t, TangentAxis);
+        calcSurfaceNormal(geometry, q.x),
+        NormalAxis,
+        q.t,
+        TangentAxis);
 }
 
 void calcGeodesicBoundaryState(
@@ -1541,11 +1518,8 @@ void calcGeodesicBoundaryState(
     const Real kappa_a = geometry.calcNormalCurvature(q.x, b);
 
     w.col(0) = tau_g * t + kappa_n * b;
-    w.col(1) = 
-        -q.a * kappa_a * t
-        -q.aDot * n
-        -q.a * tau_g * b;
-    w.col(2) = -q.r * kappa_a * t -q.rDot * n -q.r * tau_g * b;
+    w.col(1) = -q.a * kappa_a * t - q.aDot * n - q.a * tau_g * b;
+    w.col(2) = -q.r * kappa_a * t - q.rDot * n - q.r * tau_g * b;
     w.col(3) = isEnd ? w.col(0) : Vec3{0.};
 }
 
@@ -1565,11 +1539,10 @@ void calcGeodesicAndVariationImplicitly(
     std::vector<std::pair<Real, ImplicitGeodesicState>>& log)
 {
     using Y  = ImplicitGeodesicState;
-    using DY = ImplicitGeodesicStateDerivative;
+    using DY = Vec<10, Real>;
 
     std::function<DY(const Y&)> f = [&](const Y& q) -> DY {
-        return calcImplicitGeodesicStateDerivative(
-            q,
+        return q.calcDerivativeVector(
             calcAcceleration(geometry, q.x, q.t),
             calcGaussianCurvature(geometry, q.x));
     };
@@ -1587,8 +1560,20 @@ void calcGeodesicAndVariationImplicitly(
     rkm.stepTo(y0, l, ds, f, g, m, accuracy);
 
     SimTK_ASSERT(log.size() > 0, "Failed to integrate geodesic: Log is empty");
-    calcGeodesicBoundaryState(geometry, log.front().second, false, K_P, dK_P[1], dK_P[0]);
-    calcGeodesicBoundaryState(geometry, log.back().second, true, K_Q, dK_Q[1], dK_Q[0]);
+    calcGeodesicBoundaryState(
+        geometry,
+        log.front().second,
+        false,
+        K_P,
+        dK_P[1],
+        dK_P[0]);
+    calcGeodesicBoundaryState(
+        geometry,
+        log.back().second,
+        true,
+        K_Q,
+        dK_Q[1],
+        dK_Q[0]);
 
     ds = rkm.getInitStepSize();
 }
