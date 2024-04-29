@@ -20,8 +20,7 @@ namespace SimTK
 //==============================================================================
 class CurveSegment::Impl
 {
-    public:
-
+public:
     using FrenetFrame = ContactGeometry::FrenetFrame;
     using Variation   = ContactGeometry::GeodesicVariation;
     using Correction  = ContactGeometry::GeodesicCorrection;
@@ -62,13 +61,13 @@ class CurveSegment::Impl
         // Some info that can be retrieved from cache.
         struct LocalGeodesicInfo
         {
-            FrenetFrame KP{};
-            FrenetFrame KQ{};
+            FrenetFrame K_P{};
+            FrenetFrame K_Q{};
 
             Real length = NaN;
 
-            Variation dKP{};
-            Variation dKQ{};
+            Variation dK_P{};
+            Variation dK_Q{};
 
             Status status = Status::Ok;
         };
@@ -148,6 +147,12 @@ class CurveSegment::Impl
             return getCacheEntry(s).status;
         }
 
+        struct LocalGeodesicSample
+        {
+            Real length;
+            FrenetFrame frame;
+        };
+
     private:
         // The cache entry: Curve in local surface coordinated.
         // This is an auto update discrete cache variable, which makes it
@@ -156,8 +161,7 @@ class CurveSegment::Impl
         struct CacheEntry : LocalGeodesicInfo
         {
             Vec3 trackingPointOnLine{NaN, NaN, NaN};
-            std::vector<FrenetFrame> frames{}; // Empty for analytic geoemetry
-                                               // with no allocation overhead.
+            std::vector<LocalGeodesicSample> samples;
             double sHint = NaN;
         };
 
@@ -214,9 +218,9 @@ class CurveSegment::Impl
 
         Vec3 m_InitPointGuess;
 
-        size_t m_ProjectionMaxIter        = 10;
-        Real m_ProjectionRequiredAccuracy = 1e-10;
-        Real m_IntegratorAccuracy         = 1e-6;
+        size_t m_ProjectionMaxIter = 10;
+        Real m_ProjectionAccuracy  = 1e-10;
+        Real m_IntegratorAccuracy  = 1e-6;
 
         Real m_TouchdownAccuracy = 1e-3;
         size_t m_TouchdownIter   = 10;
@@ -236,11 +240,11 @@ public:
 
     // TODO you would expect the constructor to take the index as well here?
     Impl(
-            CableSpan path,
-            const MobilizedBody& mobod,
-            const Transform& X_BS,
-            ContactGeometry geometry,
-            Vec3 initPointGuess);
+        CableSpan path,
+        const MobilizedBody& mobod,
+        const Transform& X_BS,
+        ContactGeometry geometry,
+        Vec3 initPointGuess);
 
     // Position level cache: Curve in ground frame.
     struct PosInfo

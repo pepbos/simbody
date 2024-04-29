@@ -16,6 +16,7 @@ using FrameVariation    = ContactGeometry::GeodesicFrameVariation;
 using FrenetFrame       = ContactGeometry::FrenetFrame;
 using GeodesicInfo      = CurveSegment::Impl::PosInfo;
 using LocalGeodesicInfo = CurveSegment::Impl::LocalGeodesic::LocalGeodesicInfo;
+using LocalGeodesicSample = CurveSegment::Impl::LocalGeodesic::LocalGeodesicSample;
 using GeodesicInitialConditions =
     CurveSegment::Impl::LocalGeodesic::GeodesicInitialConditions;
 using GeodesicJacobian = Vec4;
@@ -33,6 +34,548 @@ static const CoordinateAxis TangentAxis  = ContactGeometry::TangentAxis;
 static const CoordinateAxis NormalAxis   = ContactGeometry::NormalAxis;
 static const CoordinateAxis BinormalAxis = ContactGeometry::BinormalAxis;
 static const int GeodesicDOF             = 4;
+} // namespace
+
+//==============================================================================
+//                                GEODESIC MATH TODO move to contact geometry
+//==============================================================================
+
+namespace
+{
+
+struct ImplicitGeodesicState
+{
+    ImplicitGeodesicState() = default;
+
+    explicit ImplicitGeodesicState(
+        Vec<10, Real>&& implicitGeodesicStateAsVector)
+    {
+        asVecMut() = implicitGeodesicStateAsVector;
+    }
+
+    ImplicitGeodesicState(Vec3 point, Vec3 tangent) : x(point), t(tangent){};
+
+    const Vec<10, Real>& asVec() const
+    {
+        return reinterpret_cast<const Vec<10, Real>&>(x[0]);
+    }
+
+    Vec<10, Real>& asVecMut()
+    {
+        return reinterpret_cast<Vec<10, Real>&>(x[0]);
+    }
+
+    Vec<10, Real> calcDerivativeVector(
+        const Vec3& acceleration,
+        Real gaussianCurvature) const
+    {
+        ImplicitGeodesicState dy;
+        dy.x    = t;
+        dy.t    = acceleration;
+        dy.a    = aDot;
+        dy.aDot = -a * gaussianCurvature;
+        dy.r    = rDot;
+        dy.rDot = -r * gaussianCurvature;
+        return {dy.asVec()};
+        ;
+    }
+
+    Vec3 x    = {NaN, NaN, NaN};
+    Vec3 t    = {NaN, NaN, NaN};
+    Real a    = 1.;
+    Real aDot = 0.;
+    Real r    = 0.;
+    Real rDot = 1.;
+};
+
+void calcSurfaceProjectionFast(
+    const ContactGeometry& geometry,
+    Vec3& x,
+    Vec3& t,
+    size_t maxIter,
+    Real eps)
+{
+    size_t it = 0;
+    for (; it < maxIter; ++it) {
+        const Real c = geometry.calcSurfaceValue(x);
+
+        if (std::abs(c) < eps) {
+            break;
+        }
+
+        const Vec3 g = geometry.calcSurfaceGradient(x);
+        x += -g * c / dot(g, g);
+    }
+
+    SimTK_ASSERT(
+        it < maxIter,
+        "Surface projection failed: Reached max iterations");
+
+    UnitVec3 n(geometry.calcSurfaceGradient(x));
+    t         = t - dot(n, t) * n;
+    Real norm = t.norm();
+    SimTK_ASSERT(!isNaN(norm), "Surface projection failed: Detected NaN");
+    SimTK_ASSERT(
+        norm > 1e-13,
+        "Surface projection failed: Tangent guess is parallel to surface "
+        "normal");
+    t = t / norm;
+}
+
+Real calcPointOnLineNearOriginAsFactor(Vec3 a, Vec3 b)
+{
+    const Vec3 e = b - a;
+    Real c = -dot(a,e) / dot(e,e);
+    return std::max(0., std::min(1., c));
+};
+
+Real calcPointOnLineNearPointAsFactor(Vec3 a, Vec3 b, Vec3 point)
+{
+    return calcPointOnLineNearOriginAsFactor(a - point, b - point);
+};
+
+bool calcNearestPointOnLineImplicitly(
+        const ContactGeometry& geometry,
+        Vec3 a,
+        Vec3 b,
+        Vec3& point,
+        size_t maxIter,
+        double eps)
+{
+    // Initial guess.
+    double alpha = calcPointOnLineNearPointAsFactor(a, b, point);
+    size_t iter  = 0;
+
+    for (; iter < maxIter; ++iter) {
+        // Touchdown point on line.
+        const Vec3 d  = b - a;
+        const Vec3 pl = a + (b - a) * alpha;
+
+        // Constraint evaluation at touchdown point.
+        const double c = geometry.calcSurfaceValue(pl);
+
+        // Break on touchdown, TODO or not?
+        if (std::abs(c) < eps)
+            break;
+
+        // Gradient at point on line.
+        const Vec3 g                  = geometry.calcSurfaceGradient(pl);
+        const Mat33 H = geometry.calcSurfaceHessian(pl);
+
+        // Add a weight to the newton step to avoid large steps.
+        constexpr double w = 0.5;
+
+        // Update alpha.
+        const double step = dot(g,d) / (dot(d,H * d) + w);
+
+        // Stop when converged.
+        if (std::abs(step) < eps)
+            break;
+
+        // Clamp the stepsize.
+        constexpr double maxStep = 0.25;
+        alpha -= std::min(std::max(-maxStep, step), maxStep);
+
+        // Stop when leaving bounds.
+        if (alpha < 0. || alpha > 1.)
+            break;
+    }
+
+    // Write the point on line nearest the surface.
+    alpha = std::max(std::min(1., alpha), 0.);
+    point = a + (b - a) * alpha;
+
+    // Assumes a negative constraint evaluation means touchdown.
+    const bool contact = geometry.calcSurfaceValue(point) < eps;
+
+    // TODO handle here?
+    if (iter >= maxIter) {
+        std::cout << "a = " << a << "\n";
+        std::cout << "b = " << b << "\n";
+        std::cout << "p = " << point << "\n";
+        std::cout << "c = " << alpha << "\n";
+        // TODO use SimTK_ASSERT
+        throw std::runtime_error("Failed to compute point on line nearest surface: Reached max iterations");
+    }
+
+    // Return number of iterations required.
+    return contact;
+}
+
+ImplicitGeodesicState operator-(
+    const ImplicitGeodesicState& lhs,
+    const ImplicitGeodesicState& rhs)
+{
+    ImplicitGeodesicState out;
+    out.asVecMut() = lhs.asVec() - rhs.asVec();
+    return out;
+}
+
+ImplicitGeodesicState operator+(
+    const ImplicitGeodesicState& lhs,
+    const Vec<10, Real>& rhs)
+{
+    ImplicitGeodesicState out;
+    out.asVecMut() = lhs.asVec() + rhs;
+    return out;
+}
+
+Real calcInfNorm(const ImplicitGeodesicState& q)
+{
+    Real infNorm = 0.;
+    for (size_t r = 0; r < q.asVec().nrow(); ++r) {
+        infNorm = std::max(infNorm, q.asVec()[r]);
+    }
+    return infNorm;
+}
+
+class RKM
+{
+    using Y  = ImplicitGeodesicState;
+    using DY = Vec<10, Real>;
+
+public:
+    RKM() = default;
+
+    // Integrate y0, populating y1, y2.
+    Real step(Real h, std::function<DY(const Y&)>& f);
+
+    struct Sample
+    {
+        Real l;
+        FrenetFrame K;
+    };
+
+    Y stepTo(
+        Y y0,
+        Real x1,
+        Real h0,
+        std::function<DY(const Y&)>& f,         // Dynamics
+        std::function<void(Y&)>& g,             // Surface projection
+        std::function<void(Real, const Y&)>& m, // State log
+        Real accuracy);
+
+    size_t getNumberOfFailedSteps() const
+    {
+        return _failedCount;
+    }
+
+    size_t getInitStepSize() const
+    {
+        return _h0;
+    }
+
+private:
+    static constexpr size_t ORDER = 5;
+
+    std::array<DY, ORDER> _k{};
+    // [yInit, ySave, yStep]
+    std::array<Y, 3> _y{};
+
+    Real _hMin = 1e-10;
+    Real _hMax = 1e-1;
+    Real _h    = NaN;
+    Real _h0   = NaN;
+    Real _e    = NaN;
+
+    size_t _failedCount = 0;
+};
+
+Real RKM::step(Real h, std::function<DY(const Y&)>& f)
+{
+    Y& yk = _y.at(1);
+
+    for (size_t i = 0; i < 5; ++i) {
+        yk = _y.at(0) + (h / 3.) * _k.at(0);
+    }
+
+    // k1
+    _k.at(0) = f(_y.at(0));
+
+    // k2
+    {
+        yk       = _y.at(0) + (h / 3.) * _k.at(0);
+        _k.at(1) = f(yk);
+    }
+
+    // k3
+    {
+        yk       = _y.at(0) + (h / 6.) * _k.at(0) + (h / 6.) * _k.at(1);
+        _k.at(2) = f(yk);
+    }
+
+    // k4
+    {
+        yk = _y.at(0) + (1. / 8. * h) * _k.at(0) + (3. / 8. * h) * _k.at(2);
+        _k.at(3) = f(yk);
+    }
+
+    // k5
+    {
+        yk = _y.at(0) + (1. / 2. * h) * _k.at(0) + (-3. / 2. * h) * _k.at(2) +
+             (2. * h) * _k.at(3);
+        _k.at(4) = f(yk);
+    }
+
+    // y1: Auxiliary --> Already updated in k5 computation.
+
+    // y2: Final state.
+    _y.at(2) = _y.at(0) + (1. / 6. * h) * _k.at(0) + (2. / 3. * h) * _k.at(3) +
+               (1. / 6. * h) * _k.at(4);
+
+    return calcInfNorm(_y.at(1) - _y.at(2)) * 0.2;
+}
+
+RKM::Y RKM::stepTo(
+    Y y0,
+    Real x1,
+    Real h0,
+    std::function<DY(const Y&)>& f,
+    std::function<void(Y&)>& g,
+    std::function<void(Real, const Y&)>& m,
+    Real accuracy)
+{
+    g(y0);
+    m(0., y0);
+
+    _y.at(0)     = std::move(y0);
+    _h           = h0;
+    _e           = 0.;
+    _failedCount = 0;
+
+    Real x = 0.;
+    while (x < x1 - 1e-13) {
+        const bool init = x == 0.;
+
+        _h = x + _h > x1 ? x1 - x : _h;
+
+        // Attempt step.
+        Real err = step(_h, f);
+
+        // Reject if accuracy was not met.
+        if (err > accuracy) { // Rejected
+            // Decrease stepsize.
+            _h /= 2.;
+            _y.at(1) = _y.at(0);
+            _y.at(2) = _y.at(0);
+            ++_failedCount;
+        } else {         // Accepted
+            g(_y.at(2)); // Enforce constraints.
+            _y.at(0) = _y.at(2);
+            _y.at(1) = _y.at(2);
+            x += _h;
+            m(x, _y.at(0));
+        }
+
+        // Potentially increase stepsize.
+        if (err < accuracy / 64.) {
+            _h *= 2.;
+        }
+
+        _e = std::max(_e, err);
+
+        SimTK_ASSERT(
+            _h > _hMin,
+            "Geodesic Integrator failed: Reached very small stepsize");
+        SimTK_ASSERT(
+            _h < _hMax,
+            "Geodesic Integrator failed: Reached very large stepsize");
+
+        if (init) {
+            _h0 = _h;
+        }
+    }
+    return _y.at(0);
+}
+
+Real calcNormalCurvature(
+    const ContactGeometry& geometry,
+    Vec3 point,
+    Vec3 tangent)
+{
+    const Vec3& p  = point;
+    const Vec3& v  = tangent;
+    const Vec3 g   = geometry.calcSurfaceGradient(p);
+    const Vec3 h_v = geometry.calcSurfaceHessian(p) * v;
+    // Sign flipped compared to thesis: kn = negative, see eq 3.63
+    return -dot(v, h_v) / g.norm();
+}
+
+Real calcGeodesicTorsion(
+    const ContactGeometry& geometry,
+    Vec3 point,
+    Vec3 tangent)
+{
+    // TODO verify this!
+    const Vec3& p  = point;
+    const Vec3& v  = tangent;
+    const Vec3 g   = geometry.calcSurfaceGradient(p);
+    const Vec3 h_v = geometry.calcSurfaceHessian(p) * v;
+    const Vec3 gxv = cross(g, v);
+    return -dot(h_v, gxv) / dot(g, g);
+}
+
+UnitVec3 calcSurfaceNormal(const ContactGeometry& geometry, Vec3 point)
+{
+    const Vec3& p       = point;
+    const Vec3 gradient = geometry.calcSurfaceGradient(p);
+    return UnitVec3{gradient};
+}
+
+Vec3 calcAcceleration(const ContactGeometry& geometry, Vec3 point, Vec3 tangent)
+{
+    // TODO Writing it out saves a root, but optimizers are smart.
+    // Sign flipped compared to thesis: kn = negative, see eq 3.63
+    return calcNormalCurvature(geometry, point, std::move(tangent)) *
+           calcSurfaceNormal(geometry, point);
+}
+
+Mat33 calcAdjoint(const Mat33& mat)
+{
+    Real fxx = mat(0, 0);
+    Real fyy = mat(1, 1);
+    Real fzz = mat(2, 2);
+
+    Real fxy = mat(0, 1);
+    Real fxz = mat(0, 2);
+    Real fyz = mat(1, 2);
+
+    std::array<Real, 9> elements = {
+        fyy * fzz - fyz * fyz,
+        fyz * fxz - fxy * fzz,
+        fxy * fyz - fyy * fxz,
+        fxz * fyz - fxy * fzz,
+        fxx * fzz - fxz * fxz,
+        fxy * fxz - fxx * fyz,
+        fxy * fyz - fxz * fyy,
+        fxy * fxz - fxx * fyz,
+        fxx * fyy - fxy * fxy};
+    Mat33 adj;
+    size_t i = 0;
+    for (size_t r = 0; r < 3; ++r) {
+        for (size_t c = 0; c < 3; ++c) {
+            adj(r, c) = elements[i];
+            ++i;
+        }
+    }
+    return adj;
+}
+
+Real calcGaussianCurvature(const ContactGeometry& geometry, Vec3 point)
+{
+    const Vec3& p = point;
+    Vec3 g        = geometry.calcSurfaceGradient(p);
+    Real gDotg    = dot(g, g);
+    Mat33 adj     = calcAdjoint(geometry.calcSurfaceHessian(p));
+
+    if (gDotg * gDotg < 1e-13) {
+        throw std::runtime_error(
+            "Gaussian curvature inaccurate: are we normal to surface?");
+    }
+
+    return (dot(g, adj * g)) / (gDotg * gDotg);
+}
+
+void calcFrenetFrame(
+    const ContactGeometry& geometry,
+    const ImplicitGeodesicState& q,
+    FrenetFrame& K)
+{
+    K.setP(q.x);
+    K.updR().setRotationFromTwoAxes(
+        calcSurfaceNormal(geometry, q.x),
+        NormalAxis,
+        q.t,
+        TangentAxis);
+}
+
+void calcGeodesicBoundaryState(
+    const ContactGeometry& geometry,
+    const ImplicitGeodesicState& q,
+    bool isEnd,
+    FrenetFrame& K,
+    Mat34& v,
+    Mat34& w)
+{
+    calcFrenetFrame(geometry, q, K);
+
+    const UnitVec3& t = K.R().getAxisUnitVec(TangentAxis);
+    const UnitVec3& n = K.R().getAxisUnitVec(NormalAxis);
+    const UnitVec3& b = K.R().getAxisUnitVec(BinormalAxis);
+
+    // TODO remove fourth element?
+    v.col(0) = t;
+    v.col(1) = b * q.a;
+    v.col(2) = b * q.r;
+    v.col(3) = isEnd ? v.col(0) : Vec3{0.};
+
+    const Real tau_g   = geometry.calcGeodesicTorsion(q.x, t);
+    const Real kappa_n = geometry.calcNormalCurvature(q.x, t);
+    const Real kappa_a = geometry.calcNormalCurvature(q.x, b);
+
+    w.col(0) = tau_g * t + kappa_n * b;
+    w.col(1) = -q.a * kappa_a * t - q.aDot * n - q.a * tau_g * b;
+    w.col(2) = -q.r * kappa_a * t - q.rDot * n - q.r * tau_g * b;
+    w.col(3) = isEnd ? w.col(0) : Vec3{0.};
+}
+
+void calcGeodesicAndVariationImplicitly(
+    const ContactGeometry& geometry,
+    Vec3 x,
+    Vec3 t,
+    Real l,
+    Real& ds,
+    FrenetFrame& K_P,
+    Variation& dK_P,
+    FrenetFrame& K_Q,
+    Variation& dK_Q,
+    Real accuracy,
+    size_t prjMaxIter,
+    Real prjAccuracy,
+    std::vector<LocalGeodesicSample>& log)
+{
+    using Y  = ImplicitGeodesicState;
+    using DY = Vec<10, Real>;
+
+    std::function<DY(const Y&)> f = [&](const Y& q) -> DY {
+        return q.calcDerivativeVector(
+            calcAcceleration(geometry, q.x, q.t),
+            calcGaussianCurvature(geometry, q.x));
+    };
+    std::function<void(Y&)> g = [&](Y& q) {
+        calcSurfaceProjectionFast(geometry, q.x, q.t, prjMaxIter, prjAccuracy);
+    };
+    std::function<void(Real, const Y&)> m = [&](Real l, const Y& q) {
+        FrenetFrame frame;
+        calcFrenetFrame(geometry, q, frame);
+        log.emplace_back(l, frame);
+    };
+
+    Y y0(x, t);
+
+    RKM rkm{};
+
+    Y y1 = rkm.stepTo(y0, l, ds, f, g, m, accuracy);
+
+    SimTK_ASSERT(log.size() > 0, "Failed to integrate geodesic: Log is empty");
+    calcGeodesicBoundaryState(
+        geometry,
+        y0,
+        false,
+        K_P,
+        dK_P[1],
+        dK_P[0]);
+    calcGeodesicBoundaryState(
+        geometry,
+        y1,
+        true,
+        K_Q,
+        dK_Q[1],
+        dK_Q[0]);
+
+    ds = rkm.getInitStepSize();
+}
+
 } // namespace
 
 //==============================================================================
@@ -266,7 +809,7 @@ void LocalGeodesic::applyGeodesicCorrection(const State& s, const Correction& c)
 
     // Get corrected initial conditions.
     const GeodesicInitialConditions g0 =
-        GeodesicInitialConditions::CreateCorrected(g.KP, g.dKP, g.length, c);
+        GeodesicInitialConditions::CreateCorrected(g.K_P, g.dK_P, g.length, c);
 
     // Shoot the new geodesic.
     shootNewGeodesic(g0, updCacheEntry(s));
@@ -279,62 +822,18 @@ void LocalGeodesic::calcPathPoints(const State& s, std::vector<Vec3>& points)
     const CacheEntry& cache = getCacheEntry(s);
 
     if (analyticFormAvailable()) {
+        throw std::runtime_error("NOTYETIMPLEMENTED");
         m_Geometry.resampleGeodesicPointsAnalytically(
-            cache.KP,
-            cache.KQ,
+            cache.K_P,
+            cache.K_Q,
             cache.length,
             m_NumberOfAnalyticPoints,
             points);
     } else {
-        for (const FrenetFrame& frame : cache.frames) {
-            points.push_back(frame.p());
+        for (const LocalGeodesicSample& sample : cache.samples) {
+            points.push_back(sample.frame.p());
         }
     }
-}
-
-//------------------------------------------------------------------------------
-//                               PRIVATE METHODS
-//------------------------------------------------------------------------------
-void LocalGeodesic::shootNewGeodesic(
-    const GeodesicInitialConditions& g0,
-    CacheEntry& cache) const
-{
-    if (m_Geometry.analyticFormAvailable()) {
-
-        m_Geometry.calcGeodesicWithVariationAnalytically(
-            g0.x,
-            g0.t,
-            g0.l,
-            cache.KP,
-            cache.dKP,
-            cache.KQ,
-            cache.dKQ);
-    } else {
-        // Compute geodesic start boundary frame and variation.
-        m_Geometry.calcNearestFrenetFrameImplicitlyFast(
-            g0.x,
-            g0.t,
-            cache.KP,
-            m_ProjectionMaxIter,
-            m_ProjectionRequiredAccuracy);
-        m_Geometry.calcGeodesicStartFrameVariationImplicitly(
-            cache.KP,
-            cache.dKP);
-        // Compute geodesic end boundary frame amd variation (shoot new
-        // geodesic).
-        m_Geometry.calcGeodesicEndFrameVariationImplicitly(
-            cache.KP,
-            g0.l,
-            cache.KQ,
-            cache.dKQ,
-            cache.sHint,
-            m_IntegratorAccuracy,
-            cache.frames);
-    }
-
-    // TODO  update step size.
-    // TODO  update line tracking?
-    throw std::runtime_error("NOTYETIMPLEMENTED");
 }
 
 void LocalGeodesic::calcLiftoffIfNeeded(
@@ -355,8 +854,8 @@ void LocalGeodesic::calcLiftoffIfNeeded(
 
     // For a zero-length curve, trigger liftoff when the prev and next points
     // lie above the surface plane.
-    if (dot(prev_QS - g.KP.p(), g.KP.R().getAxisUnitVec(NormalAxis)) <= 0. &&
-        dot(next_PS - g.KP.p(), g.KP.R().getAxisUnitVec(NormalAxis)) <= 0.) {
+    if (dot(prev_QS - g.K_P.p(), g.K_P.R().getAxisUnitVec(NormalAxis)) <= 0. &&
+        dot(next_PS - g.K_P.p(), g.K_P.R().getAxisUnitVec(NormalAxis)) <= 0.) {
         // No liftoff.
         return;
     }
@@ -364,7 +863,7 @@ void LocalGeodesic::calcLiftoffIfNeeded(
     // Liftoff detected: update status.
     g.status = Status::Liftoff;
     // Initialize the tracking point from the last geodesic start point.
-    cache.trackingPointOnLine = g.KP.p();
+    cache.trackingPointOnLine = g.K_P.p();
 }
 
 void LocalGeodesic::calcTouchdownIfNeeded(
@@ -382,12 +881,14 @@ void LocalGeodesic::calcTouchdownIfNeeded(
     // that is nearest to the surface.
     bool touchdownDetected;
     if (m_Geometry.analyticFormAvailable()) {
-        touchdownDetected = m_Geometry.calcNearestPointOnLineAnalytically(
-            prev_QS,
-            next_PS,
-            cache.trackingPointOnLine);
+        throw std::runtime_error("NOTYETIMPLEMENTED");
+        /* touchdownDetected = m_Geometry.calcNearestPointOnLineAnalytically( */
+        /*     prev_QS, */
+        /*     next_PS, */
+        /*     cache.trackingPointOnLine); */
     } else {
-        touchdownDetected = m_Geometry.calcNearestPointOnLineImplicitly(
+        touchdownDetected = calcNearestPointOnLineImplicitly(
+            m_Geometry,
             prev_QS,
             next_PS,
             cache.trackingPointOnLine,
@@ -437,6 +938,60 @@ void LocalGeodesic::calcCacheEntry(
     calcLiftoffIfNeeded(prev_QS, next_PS, cache);
 }
 
+void LocalGeodesic::shootNewGeodesic(
+    const GeodesicInitialConditions& g0,
+    CacheEntry& cache) const
+{
+    calcGeodesicAndVariationImplicitly(
+            m_Geometry,
+            g0.x,
+            g0.t,
+            g0.l,
+            cache.sHint,
+            cache.K_P,
+            cache.dK_P,
+            cache.K_Q,
+            cache.dK_Q,
+            m_IntegratorAccuracy,
+            m_ProjectionMaxIter,
+            m_ProjectionAccuracy,
+            cache.samples);
+
+    /* using Y  = ImplicitGeodesicState; */
+    /* if (m_Geometry.analyticFormAvailable()) { */
+
+    /*     m_Geometry.calcGeodesicWithVariationAnalytically( */
+    /*         g0.x, */
+    /*         g0.t, */
+    /*         g0.l, */
+    /*         cache.KP, */
+    /*         cache.dKP, */
+    /*         cache.KQ, */
+    /*         cache.dKQ); */
+    /* } else { */
+    /*     // Compute geodesic start boundary frame and variation. */
+    /*     m_Geometry.calcNearestFrenetFrameImplicitlyFast( */
+    /*         g0.x, */
+    /*         g0.t, */
+    /*         cache.KP, */
+    /*         m_ProjectionMaxIter, */
+    /*         m_ProjectionRequiredAccuracy); */
+    /*     m_Geometry.calcGeodesicStartFrameVariationImplicitly( */
+    /*         cache.KP, */
+    /*         cache.dKP); */
+    /*     // Compute geodesic end boundary frame amd variation (shoot new */
+    /*     // geodesic). */
+    /*     m_Geometry.calcGeodesicEndFrameVariationImplicitly( */
+    /*         cache.KP, */
+    /*         g0.l, */
+    /*         cache.KQ, */
+    /*         cache.dKQ, */
+    /*         cache.sHint, */
+    /*         m_IntegratorAccuracy, */
+    /*         cache.frames); */
+    /* } */
+}
+
 //==============================================================================
 //                               CURVE SEGMENT
 //==============================================================================
@@ -449,7 +1004,10 @@ CurveSegment::CurveSegment(
         Vec3 xHint)
     : m_Impl(std::shared_ptr<CurveSegment::Impl>(new CurveSegment::Impl(cable, mobod, X_BS, geometry, xHint)))
 {
+    // TODO bit awkward to set the index later.
     updImpl().setIndex(cable.adoptSegment(*this));
+    /* CurveSegmentIndex ix = cable.adoptSegment(*this); */
+    /* m_Impl = std::shared_ptr<CurveSegment::Impl>(new CurveSegment::Impl(cable, ix, mobod, X_BS, geometry, xHint)); */
 }
 
 const CableSpan& CurveSegment::getCable() const
@@ -553,14 +1111,14 @@ void xformSurfaceGeodesicToGround(
     geodesic_G.X_GS = X_GS;
 
     // Store the the local geodesic in ground frame.
-    geodesic_G.KP = X_GS.compose(geodesic_S.KP);
-    geodesic_G.KQ = X_GS.compose(geodesic_S.KQ);
+    geodesic_G.KP = X_GS.compose(geodesic_S.K_P);
+    geodesic_G.KQ = X_GS.compose(geodesic_S.K_Q);
 
-    geodesic_G.dKP[0] = X_GS.R() * geodesic_S.dKP[0];
-    geodesic_G.dKP[1] = X_GS.R() * geodesic_S.dKP[1];
+    geodesic_G.dKP[0] = X_GS.R() * geodesic_S.dK_P[0];
+    geodesic_G.dKP[1] = X_GS.R() * geodesic_S.dK_P[1];
 
-    geodesic_G.dKQ[0] = X_GS.R() * geodesic_S.dKQ[0];
-    geodesic_G.dKQ[1] = X_GS.R() * geodesic_S.dKQ[1];
+    geodesic_G.dKQ[0] = X_GS.R() * geodesic_S.dK_Q[0];
+    geodesic_G.dKQ[1] = X_GS.R() * geodesic_S.dK_Q[1];
 
     // TODO use SpatialVec for variation.
     /* for (size_t i = 0; i < GeodesicDOF; ++i) { */
@@ -1203,461 +1761,3 @@ CableSpan& CableSubsystem::updPath(CableSpanIndex ix)
 {
     return updImpl().updCablePath(ix);
 }
-
-//==============================================================================
-//                                GEODESIC
-//==============================================================================
-
-namespace
-{
-
-struct ImplicitGeodesicState
-{
-    ImplicitGeodesicState() = default;
-
-    explicit ImplicitGeodesicState(
-        Vec<10, Real>&& implicitGeodesicStateAsVector)
-    {
-        asVecMut() = implicitGeodesicStateAsVector;
-    }
-
-    ImplicitGeodesicState(Vec3 point, Vec3 tangent) : x(point), t(tangent){};
-
-    const Vec<10, Real>& asVec() const
-    {
-        return reinterpret_cast<const Vec<10, Real>&>(x[0]);
-    }
-
-    Vec<10, Real>& asVecMut()
-    {
-        return reinterpret_cast<Vec<10, Real>&>(x[0]);
-    }
-
-    Vec<10, Real> calcDerivativeVector(
-        const Vec3& acceleration,
-        Real gaussianCurvature) const
-    {
-        ImplicitGeodesicState dy;
-        dy.x    = t;
-        dy.t    = acceleration;
-        dy.a    = aDot;
-        dy.aDot = -a * gaussianCurvature;
-        dy.r    = rDot;
-        dy.rDot = -r * gaussianCurvature;
-        return {dy.asVec()};
-        ;
-    }
-
-    Vec3 x    = {NaN, NaN, NaN};
-    Vec3 t    = {NaN, NaN, NaN};
-    Real a    = 1.;
-    Real aDot = 0.;
-    Real r    = 0.;
-    Real rDot = 1.;
-};
-
-void calcSurfaceProjectionFast(
-    const ContactGeometry& geometry,
-    Vec3& x,
-    Vec3& t,
-    size_t maxIter,
-    Real eps)
-{
-    size_t it = 0;
-    for (; it < maxIter; ++it) {
-        const Real c = geometry.calcSurfaceValue(x);
-
-        if (std::abs(c) < eps) {
-            break;
-        }
-
-        const Vec3 g = geometry.calcSurfaceGradient(x);
-        x += -g * c / dot(g, g);
-    }
-
-    SimTK_ASSERT(
-        it < maxIter,
-        "Surface projection failed: Reached max iterations");
-
-    UnitVec3 n(geometry.calcSurfaceGradient(x));
-    t         = t - dot(n, t) * n;
-    Real norm = t.norm();
-    SimTK_ASSERT(!isNaN(norm), "Surface projection failed: Detected NaN");
-    SimTK_ASSERT(
-        norm > 1e-13,
-        "Surface projection failed: Tangent guess is parallel to surface "
-        "normal");
-    t = t / norm;
-}
-
-ImplicitGeodesicState operator-(
-    const ImplicitGeodesicState& lhs,
-    const ImplicitGeodesicState& rhs)
-{
-    ImplicitGeodesicState out;
-    out.asVecMut() = lhs.asVec() - rhs.asVec();
-    return out;
-}
-
-ImplicitGeodesicState operator+(
-    const ImplicitGeodesicState& lhs,
-    const Vec<10, Real>& rhs)
-{
-    ImplicitGeodesicState out;
-    out.asVecMut() = lhs.asVec() + rhs;
-    return out;
-}
-
-Real calcInfNorm(const ImplicitGeodesicState& q)
-{
-    Real infNorm = 0.;
-    for (size_t r = 0; r < q.asVec().nrow(); ++r) {
-        infNorm = std::max(infNorm, q.asVec()[r]);
-    }
-    return infNorm;
-}
-
-class RKM
-{
-    using Y  = ImplicitGeodesicState;
-    using DY = Vec<10, Real>;
-
-public:
-    RKM() = default;
-
-    // Integrate y0, populating y1, y2.
-    Real step(Real h, std::function<DY(const Y&)>& f);
-
-    struct Sample
-    {
-        Real l;
-        FrenetFrame K;
-    };
-
-    Real stepTo(
-        Y y0,
-        Real x1,
-        Real h0,
-        std::function<DY(const Y&)>& f,         // Dynamics
-        std::function<void(Y&)>& g,             // Surface projection
-        std::function<void(Real, const Y&)>& m, // State log
-        Real accuracy);
-
-    size_t getNumberOfFailedSteps() const
-    {
-        return _failedCount;
-    }
-
-    size_t getInitStepSize() const
-    {
-        return _h0;
-    }
-
-private:
-    static constexpr size_t ORDER = 5;
-
-    std::array<DY, ORDER> _k{};
-    std::array<Y, 3> _y{};
-
-    Real _hMin = 1e-10;
-    Real _hMax = 1e-1;
-    Real _h    = NaN;
-    Real _h0   = NaN;
-    Real _e    = NaN;
-
-    size_t _failedCount = 0;
-};
-
-Real RKM::step(Real h, std::function<DY(const Y&)>& f)
-{
-    Y& yk = _y.at(1);
-
-    for (size_t i = 0; i < 5; ++i) {
-        yk = _y.at(0) + (h / 3.) * _k.at(0);
-    }
-
-    // k1
-    _k.at(0) = f(_y.at(0));
-
-    // k2
-    {
-        yk       = _y.at(0) + (h / 3.) * _k.at(0);
-        _k.at(1) = f(yk);
-    }
-
-    // k3
-    {
-        yk       = _y.at(0) + (h / 6.) * _k.at(0) + (h / 6.) * _k.at(1);
-        _k.at(2) = f(yk);
-    }
-
-    // k4
-    {
-        yk = _y.at(0) + (1. / 8. * h) * _k.at(0) + (3. / 8. * h) * _k.at(2);
-        _k.at(3) = f(yk);
-    }
-
-    // k5
-    {
-        yk = _y.at(0) + (1. / 2. * h) * _k.at(0) + (-3. / 2. * h) * _k.at(2) +
-             (2. * h) * _k.at(3);
-        _k.at(4) = f(yk);
-    }
-
-    // y1: Auxiliary --> Already updated in k5 computation.
-
-    // y2: Final state.
-    _y.at(2) = _y.at(0) + (1. / 6. * h) * _k.at(0) + (2. / 3. * h) * _k.at(3) +
-               (1. / 6. * h) * _k.at(4);
-
-    return calcInfNorm(_y.at(1) - _y.at(2)) * 0.2;
-}
-
-Real RKM::stepTo(
-    Y y0,
-    Real x1,
-    Real h0,
-    std::function<DY(const Y&)>& f,
-    std::function<void(Y&)>& g,
-    std::function<void(Real, const Y&)>& m,
-    Real accuracy)
-{
-    g(y0);
-    m(0., y0);
-
-    _y.at(0)     = std::move(y0);
-    _h           = h0;
-    _e           = 0.;
-    _failedCount = 0;
-
-    Real x = 0.;
-    while (x < x1 - 1e-13) {
-        const bool init = x == 0.;
-
-        _h = x + _h > x1 ? x1 - x : _h;
-
-        // Attempt step.
-        Real err = step(_h, f);
-
-        // Reject if accuracy was not met.
-        if (err > accuracy) { // Rejected
-            // Decrease stepsize.
-            _h /= 2.;
-            _y.at(1) = _y.at(0);
-            _y.at(2) = _y.at(0);
-            ++_failedCount;
-        } else {         // Accepted
-            g(_y.at(2)); // Enforce constraints.
-            _y.at(0) = _y.at(2);
-            _y.at(1) = _y.at(2);
-            x += _h;
-            m(x, _y.at(0));
-        }
-
-        // Potentially increase stepsize.
-        if (err < accuracy / 64.) {
-            _h *= 2.;
-        }
-
-        _e = std::max(_e, err);
-
-        SimTK_ASSERT(
-            _h > _hMin,
-            "Geodesic Integrator failed: Reached very small stepsize");
-        SimTK_ASSERT(
-            _h < _hMax,
-            "Geodesic Integrator failed: Reached very large stepsize");
-
-        if (init) {
-            _h0 = _h;
-        }
-    }
-}
-
-Real calcNormalCurvature(
-    const ContactGeometry& geometry,
-    Vec3 point,
-    Vec3 tangent)
-{
-    const Vec3& p  = point;
-    const Vec3& v  = tangent;
-    const Vec3 g   = geometry.calcSurfaceGradient(p);
-    const Vec3 h_v = geometry.calcSurfaceHessian(p) * v;
-    // Sign flipped compared to thesis: kn = negative, see eq 3.63
-    return -dot(v, h_v) / g.norm();
-}
-
-Real calcGeodesicTorsion(
-    const ContactGeometry& geometry,
-    Vec3 point,
-    Vec3 tangent)
-{
-    // TODO verify this!
-    const Vec3& p  = point;
-    const Vec3& v  = tangent;
-    const Vec3 g   = geometry.calcSurfaceGradient(p);
-    const Vec3 h_v = geometry.calcSurfaceHessian(p) * v;
-    const Vec3 gxv = cross(g, v);
-    return -dot(h_v, gxv) / dot(g, g);
-}
-
-UnitVec3 calcSurfaceNormal(const ContactGeometry& geometry, Vec3 point)
-{
-    const Vec3& p       = point;
-    const Vec3 gradient = geometry.calcSurfaceGradient(p);
-    return UnitVec3{gradient};
-}
-
-Vec3 calcAcceleration(const ContactGeometry& geometry, Vec3 point, Vec3 tangent)
-{
-    // TODO Writing it out saves a root, but optimizers are smart.
-    // Sign flipped compared to thesis: kn = negative, see eq 3.63
-    return calcNormalCurvature(geometry, point, std::move(tangent)) *
-           calcSurfaceNormal(geometry, point);
-}
-
-Mat33 calcAdjoint(const Mat33& mat)
-{
-    Real fxx = mat(0, 0);
-    Real fyy = mat(1, 1);
-    Real fzz = mat(2, 2);
-
-    Real fxy = mat(0, 1);
-    Real fxz = mat(0, 2);
-    Real fyz = mat(1, 2);
-
-    std::array<Real, 9> elements = {
-        fyy * fzz - fyz * fyz,
-        fyz * fxz - fxy * fzz,
-        fxy * fyz - fyy * fxz,
-        fxz * fyz - fxy * fzz,
-        fxx * fzz - fxz * fxz,
-        fxy * fxz - fxx * fyz,
-        fxy * fyz - fxz * fyy,
-        fxy * fxz - fxx * fyz,
-        fxx * fyy - fxy * fxy};
-    Mat33 adj;
-    size_t i = 0;
-    for (size_t r = 0; r < 3; ++r) {
-        for (size_t c = 0; c < 3; ++c) {
-            adj(r, c) = elements[i];
-            ++i;
-        }
-    }
-    return adj;
-}
-
-Real calcGaussianCurvature(const ContactGeometry& geometry, Vec3 point)
-{
-    const Vec3& p = point;
-    Vec3 g        = geometry.calcSurfaceGradient(p);
-    Real gDotg    = dot(g, g);
-    Mat33 adj     = calcAdjoint(geometry.calcSurfaceHessian(p));
-
-    if (gDotg * gDotg < 1e-13) {
-        throw std::runtime_error(
-            "Gaussian curvature inaccurate: are we normal to surface?");
-    }
-
-    return (dot(g, adj * g)) / (gDotg * gDotg);
-}
-
-void calcFrenetFrame(
-    const ContactGeometry& geometry,
-    const ImplicitGeodesicState& q,
-    FrenetFrame& K)
-{
-    K.setP(q.x);
-    K.updR().setRotationFromTwoAxes(
-        calcSurfaceNormal(geometry, q.x),
-        NormalAxis,
-        q.t,
-        TangentAxis);
-}
-
-void calcGeodesicBoundaryState(
-    const ContactGeometry& geometry,
-    const ImplicitGeodesicState& q,
-    bool isEnd,
-    FrenetFrame& K,
-    Mat34& v,
-    Mat34& w)
-{
-    calcFrenetFrame(geometry, q, K);
-
-    const UnitVec3& t = K.R().getAxisUnitVec(TangentAxis);
-    const UnitVec3& n = K.R().getAxisUnitVec(NormalAxis);
-    const UnitVec3& b = K.R().getAxisUnitVec(BinormalAxis);
-
-    // TODO remove fourth element?
-    v.col(0) = t;
-    v.col(1) = b * q.a;
-    v.col(2) = b * q.r;
-    v.col(3) = isEnd ? v.col(0) : Vec3{0.};
-
-    const Real tau_g   = geometry.calcGeodesicTorsion(q.x, t);
-    const Real kappa_n = geometry.calcNormalCurvature(q.x, t);
-    const Real kappa_a = geometry.calcNormalCurvature(q.x, b);
-
-    w.col(0) = tau_g * t + kappa_n * b;
-    w.col(1) = -q.a * kappa_a * t - q.aDot * n - q.a * tau_g * b;
-    w.col(2) = -q.r * kappa_a * t - q.rDot * n - q.r * tau_g * b;
-    w.col(3) = isEnd ? w.col(0) : Vec3{0.};
-}
-
-void calcGeodesicAndVariationImplicitly(
-    const ContactGeometry& geometry,
-    Vec3 x,
-    Vec3 t,
-    Real l,
-    Real& ds,
-    FrenetFrame& K_P,
-    Variation& dK_P,
-    FrenetFrame& K_Q,
-    Variation& dK_Q,
-    Real accuracy,
-    size_t prjMaxIter,
-    Real prjAccuracy,
-    std::vector<std::pair<Real, ImplicitGeodesicState>>& log)
-{
-    using Y  = ImplicitGeodesicState;
-    using DY = Vec<10, Real>;
-
-    std::function<DY(const Y&)> f = [&](const Y& q) -> DY {
-        return q.calcDerivativeVector(
-            calcAcceleration(geometry, q.x, q.t),
-            calcGaussianCurvature(geometry, q.x));
-    };
-    std::function<void(Y&)> g = [&](Y& q) {
-        calcSurfaceProjectionFast(geometry, q.x, q.t, prjMaxIter, prjAccuracy);
-    };
-    std::function<void(Real, const Y&)> m = [&](Real l, const Y& q) {
-        log.emplace_back(l, q);
-    };
-
-    Y y0(x, t);
-
-    RKM rkm{};
-
-    rkm.stepTo(y0, l, ds, f, g, m, accuracy);
-
-    SimTK_ASSERT(log.size() > 0, "Failed to integrate geodesic: Log is empty");
-    calcGeodesicBoundaryState(
-        geometry,
-        log.front().second,
-        false,
-        K_P,
-        dK_P[1],
-        dK_P[0]);
-    calcGeodesicBoundaryState(
-        geometry,
-        log.back().second,
-        true,
-        K_Q,
-        dK_Q[1],
-        dK_Q[0]);
-
-    ds = rkm.getInitStepSize();
-}
-
-} // namespace
