@@ -304,12 +304,12 @@ public:
 
     bool isActive(const State& s) const
     {
-        return m_Surface.getStatus(s) == Status::Ok;
+        return m_Geodesic.getStatus(s) == Status::Ok;
     }
 
     Status getStatus(const State& s) const
     {
-        return m_Surface.getStatus(s);
+        return m_Geodesic.getStatus(s);
     }
 
     void calcInitZeroLengthGeodesic(State& state, Vec3 prev_QS) const;
@@ -379,7 +379,7 @@ private:
     MobilizedBody m_Mobod;
     Transform m_Offset;
 
-    LocalGeodesic m_Surface; // TODO rename
+    LocalGeodesic m_Geodesic;
 
     // TOPOLOGY CACHE
     CacheEntryIndex m_PosInfoIx;

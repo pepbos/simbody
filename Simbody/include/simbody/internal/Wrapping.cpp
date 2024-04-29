@@ -1030,9 +1030,11 @@ CurveSegment::Impl::Impl(
     ContactGeometry geometry,
     Vec3 initPointGuess) :
     m_Subsystem(path.getImpl().getSubsystem()),
-    m_Path(path), m_Index(-1), // TODO what to do with this index, and when
-    m_Mobod(mobod), m_Offset(X_BS),
-    m_Surface(m_Subsystem, geometry, initPointGuess)
+    m_Path(path),
+    m_Index(-1), // TODO what to do with this index, and when
+    m_Mobod(mobod),
+    m_Offset(X_BS),
+    m_Geodesic(m_Subsystem, geometry, initPointGuess)
 {}
 
 void CurveSegment::Impl::realizeTopology(State& s)
@@ -1061,11 +1063,11 @@ void CurveSegment::Impl::calcInitZeroLengthGeodesic(State& s, Vec3 prev_QG)
 
     Vec3 prev_QS = X_GS.shiftBaseStationToFrame(prev_QG);
     Vec3 xGuess_S =
-        m_Surface.getInitialPointGuess(); // TODO move into function call?
+        m_Geodesic.getInitialPointGuess(); // TODO move into function call?
 
     GeodesicInitialConditions g0 =
         GeodesicInitialConditions::CreateZeroLengthGuess(prev_QS, xGuess_S);
-    m_Surface.calcInitialGeodesic(s, g0);
+    m_Geodesic.calcInitialGeodesic(s, g0);
 
     m_Subsystem.markCacheValueNotRealized(s, m_PosInfoIx);
 }
@@ -1075,7 +1077,7 @@ void CurveSegment::Impl::applyGeodesicCorrection(
     const CurveSegment::Impl::Correction& c) const
 {
     // Apply correction to curve.
-    m_Surface.applyGeodesicCorrection(s, c);
+    m_Geodesic.applyGeodesicCorrection(s, c);
 
     // Invalidate position level cache.
     m_Subsystem.markCacheValueNotRealized(s, m_PosInfoIx);
@@ -1087,7 +1089,7 @@ void CurveSegment::Impl::calcPathPoints(
 {
     const Transform& X_GS = getPosInfo(s).X_GS;
     size_t initSize       = points.size();
-    m_Surface.calcPathPoints(s, points);
+    m_Geodesic.calcPathPoints(s, points);
     for (size_t i = points.size() - initSize; i < points.size(); ++i) {
         points.at(i) = X_GS.shiftFrameStationToBase(points.at(i));
     }
@@ -1133,7 +1135,7 @@ void xformSurfaceGeodesicToGround(
 
 void CurveSegment::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 {
-    if (m_Surface.getStatus(s) == Status::Disabled) {
+    if (m_Geodesic.getStatus(s) == Status::Disabled) {
         return;
     }
 
@@ -1152,7 +1154,7 @@ void CurveSegment::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
     // TODO this doesnt follow the regular invalidation scheme...
     // Grab the last geodesic that was computed.
     const LocalGeodesicInfo& geodesic_S =
-        m_Surface.calcLocalGeodesicInfo(s, prev_S, next_S);
+        m_Geodesic.calcLocalGeodesicInfo(s, prev_S, next_S);
 
     // Store the the local geodesic in ground frame.
     xformSurfaceGeodesicToGround(geodesic_S, X_GS, updPosInfo(s));
