@@ -6,8 +6,8 @@
 #include "WrappingImpl.h"
 #include "simmath/internal/ContactGeometry.h"
 #include <cstddef>
-#include <stdexcept>
 #include <memory>
+#include <stdexcept>
 
 using namespace SimTK;
 
@@ -16,7 +16,8 @@ using FrameVariation    = ContactGeometry::GeodesicFrameVariation;
 using FrenetFrame       = ContactGeometry::FrenetFrame;
 using GeodesicInfo      = CurveSegment::Impl::PosInfo;
 using LocalGeodesicInfo = CurveSegment::Impl::LocalGeodesic::LocalGeodesicInfo;
-using LocalGeodesicSample = CurveSegment::Impl::LocalGeodesic::LocalGeodesicSample;
+using LocalGeodesicSample =
+    CurveSegment::Impl::LocalGeodesic::LocalGeodesicSample;
 using GeodesicInitialConditions =
     CurveSegment::Impl::LocalGeodesic::GeodesicInitialConditions;
 using GeodesicJacobian = Vec4;
@@ -125,7 +126,7 @@ void calcSurfaceProjectionFast(
 Real calcPointOnLineNearOriginAsFactor(Vec3 a, Vec3 b)
 {
     const Vec3 e = b - a;
-    Real c = -dot(a,e) / dot(e,e);
+    Real c       = -dot(a, e) / dot(e, e);
     return std::max(0., std::min(1., c));
 };
 
@@ -135,12 +136,12 @@ Real calcPointOnLineNearPointAsFactor(Vec3 a, Vec3 b, Vec3 point)
 };
 
 bool calcNearestPointOnLineImplicitly(
-        const ContactGeometry& geometry,
-        Vec3 a,
-        Vec3 b,
-        Vec3& point,
-        size_t maxIter,
-        double eps)
+    const ContactGeometry& geometry,
+    Vec3 a,
+    Vec3 b,
+    Vec3& point,
+    size_t maxIter,
+    double eps)
 {
     // Initial guess.
     double alpha = calcPointOnLineNearPointAsFactor(a, b, point);
@@ -159,14 +160,14 @@ bool calcNearestPointOnLineImplicitly(
             break;
 
         // Gradient at point on line.
-        const Vec3 g                  = geometry.calcSurfaceGradient(pl);
+        const Vec3 g  = geometry.calcSurfaceGradient(pl);
         const Mat33 H = geometry.calcSurfaceHessian(pl);
 
         // Add a weight to the newton step to avoid large steps.
         constexpr double w = 0.5;
 
         // Update alpha.
-        const double step = dot(g,d) / (dot(d,H * d) + w);
+        const double step = dot(g, d) / (dot(d, H * d) + w);
 
         // Stop when converged.
         if (std::abs(step) < eps)
@@ -195,7 +196,8 @@ bool calcNearestPointOnLineImplicitly(
         std::cout << "p = " << point << "\n";
         std::cout << "c = " << alpha << "\n";
         // TODO use SimTK_ASSERT
-        throw std::runtime_error("Failed to compute point on line nearest surface: Reached max iterations");
+        throw std::runtime_error("Failed to compute point on line nearest "
+                                 "surface: Reached max iterations");
     }
 
     // Return number of iterations required.
@@ -558,20 +560,8 @@ void calcGeodesicAndVariationImplicitly(
     Y y1 = rkm.stepTo(y0, l, ds, f, g, m, accuracy);
 
     SimTK_ASSERT(log.size() > 0, "Failed to integrate geodesic: Log is empty");
-    calcGeodesicBoundaryState(
-        geometry,
-        y0,
-        false,
-        K_P,
-        dK_P[1],
-        dK_P[0]);
-    calcGeodesicBoundaryState(
-        geometry,
-        y1,
-        true,
-        K_Q,
-        dK_Q[1],
-        dK_Q[0]);
+    calcGeodesicBoundaryState(geometry, y0, false, K_P, dK_P[1], dK_P[0]);
+    calcGeodesicBoundaryState(geometry, y1, true, K_Q, dK_Q[1], dK_Q[0]);
 
     ds = rkm.getInitStepSize();
 }
@@ -943,19 +933,19 @@ void LocalGeodesic::shootNewGeodesic(
     CacheEntry& cache) const
 {
     calcGeodesicAndVariationImplicitly(
-            m_Geometry,
-            g0.x,
-            g0.t,
-            g0.l,
-            cache.sHint,
-            cache.K_P,
-            cache.dK_P,
-            cache.K_Q,
-            cache.dK_Q,
-            m_IntegratorAccuracy,
-            m_ProjectionMaxIter,
-            m_ProjectionAccuracy,
-            cache.samples);
+        m_Geometry,
+        g0.x,
+        g0.t,
+        g0.l,
+        cache.sHint,
+        cache.K_P,
+        cache.dK_P,
+        cache.K_Q,
+        cache.dK_Q,
+        m_IntegratorAccuracy,
+        m_ProjectionMaxIter,
+        m_ProjectionAccuracy,
+        cache.samples);
 
     /* using Y  = ImplicitGeodesicState; */
     /* if (m_Geometry.analyticFormAvailable()) { */
@@ -997,17 +987,19 @@ void LocalGeodesic::shootNewGeodesic(
 //==============================================================================
 
 CurveSegment::CurveSegment(
-        CableSpan cable,
-        const MobilizedBody& mobod,
-        Transform X_BS,
-        const ContactGeometry& geometry,
-        Vec3 xHint)
-    : m_Impl(std::shared_ptr<CurveSegment::Impl>(new CurveSegment::Impl(cable, mobod, X_BS, geometry, xHint)))
+    CableSpan cable,
+    const MobilizedBody& mobod,
+    Transform X_BS,
+    const ContactGeometry& geometry,
+    Vec3 xHint) :
+    m_Impl(std::shared_ptr<CurveSegment::Impl>(
+        new CurveSegment::Impl(cable, mobod, X_BS, geometry, xHint)))
 {
     // TODO bit awkward to set the index later.
     updImpl().setIndex(cable.adoptSegment(*this));
     /* CurveSegmentIndex ix = cable.adoptSegment(*this); */
-    /* m_Impl = std::shared_ptr<CurveSegment::Impl>(new CurveSegment::Impl(cable, ix, mobod, X_BS, geometry, xHint)); */
+    /* m_Impl = std::shared_ptr<CurveSegment::Impl>(new
+     * CurveSegment::Impl(cable, ix, mobod, X_BS, geometry, xHint)); */
 }
 
 const CableSpan& CurveSegment::getCable() const
@@ -1255,17 +1247,18 @@ GeodesicJacobian addPathErrorJacobian(
 //==============================================================================
 
 CableSpan::CableSpan(
-        CableSubsystem& subsystem,
-        const MobilizedBody& originBody,
-        const Vec3& defaultOriginPoint,
-        const MobilizedBody& terminationBody,
-        const Vec3& defaultTerminationPoint) :
+    CableSubsystem& subsystem,
+    const MobilizedBody& originBody,
+    const Vec3& defaultOriginPoint,
+    const MobilizedBody& terminationBody,
+    const Vec3& defaultTerminationPoint) :
     m_Impl(std::shared_ptr<Impl>(new Impl(
         subsystem,
         originBody,
         defaultOriginPoint,
         terminationBody,
-        defaultTerminationPoint))) {}
+        defaultTerminationPoint)))
+{}
 
 CurveSegmentIndex CableSpan::adoptSegment(const CurveSegment& segment)
 {
@@ -1292,9 +1285,9 @@ Real CableSpan::getLengthDot(const State& s) const
     return getImpl().getVelInfo(s).lengthDot;
 }
 void CableSpan::applyBodyForces(
-        const State& s,
-        Real tension,
-        Vector_<SpatialVec>& bodyForcesInG) const
+    const State& s,
+    Real tension,
+    Vector_<SpatialVec>& bodyForcesInG) const
 {
     return getImpl().applyBodyForces(s, tension, bodyForcesInG);
 }
