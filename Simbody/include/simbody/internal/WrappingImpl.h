@@ -84,6 +84,7 @@ public:
                 const Variation& dKP,
                 Real l,
                 const Correction& c);
+            // TODO remove this ctor.
             static GeodesicInitialConditions CreateFromGroundInSurfaceFrame(
                 const Transform& X_GS,
                 Vec3 x_G,
