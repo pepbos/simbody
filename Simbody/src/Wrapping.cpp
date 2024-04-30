@@ -672,11 +672,11 @@ using LocalGeodesic = CurveSegment::Impl::LocalGeodesic;
 void LocalGeodesic::realizeTopology(State& s)
 {
     // Allocate an auto-update discrete variable for the last computed geodesic.
-    CacheEntry cache{};
+    Value<CacheEntry>* cache = new Value<CacheEntry>();
     m_CacheIx = updSubsystem().allocateAutoUpdateDiscreteVariable(
         s,
-        Stage::Velocity,
-        new Value<CacheEntry>(cache),
+        Stage::Report,
+        cache,
         Stage::Position);
 }
 
@@ -700,7 +700,7 @@ const LocalGeodesicInfo& LocalGeodesic::calcInitialGeodesic(
     shootNewGeodesic(g0, cache);
     updCacheEntry(s) = cache;
     getSubsystem().markDiscreteVarUpdateValueRealized(s, m_CacheIx);
-    return getCacheEntry(s);
+    return cache;
 }
 
 const LocalGeodesicInfo& LocalGeodesic::calcLocalGeodesicInfo(
@@ -717,8 +717,6 @@ const LocalGeodesicInfo& LocalGeodesic::calcLocalGeodesicInfo(
 void LocalGeodesic::applyGeodesicCorrection(const State& s, const Correction& c)
     const
 {
-    realizePosition(s);
-
     // Get the previous geodesic.
     const CacheEntry& g = getCacheEntry(s);
 
@@ -1246,12 +1244,14 @@ void CableSpan::Impl::realizeTopology(State& s)
     m_PosInfoIx = updSubsystem().allocateCacheEntry(
         s,
         Stage::Position,
+        Stage::Infinity,
         new Value<PosInfo>(posInfo));
 
     VelInfo velInfo{};
     m_VelInfoIx = updSubsystem().allocateCacheEntry(
         s,
         Stage::Velocity,
+        Stage::Infinity,
         new Value<VelInfo>(velInfo));
 }
 

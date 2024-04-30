@@ -172,10 +172,12 @@ public:
             double sHint = NaN;
         };
 
-        const CacheEntry& getCacheEntry(const State& state) const
+        const CacheEntry& getCacheEntry(const State& s) const
         {
+            std::cout << "LocalGeodesic::getCacheEntry\n";
+            realizePosition(s);
             return Value<CacheEntry>::downcast(
-                getSubsystem().getDiscreteVarUpdateValue(state, m_CacheIx));
+                getSubsystem().getDiscreteVarUpdateValue(s, m_CacheIx));
         }
 
         CacheEntry& updCacheEntry(const State& state) const
@@ -637,6 +639,7 @@ class CableSubsystem::Impl : public Subsystem::Guts
         // Topology cache is const.
         Impl* wThis = const_cast<Impl*>(this);
 
+        wThis->realizeTopology(state);
         for (CableSpanIndex ix(0); ix < cables.size(); ++ix) {
             CableSpan& path = wThis->updCablePath(ix);
             path.updImpl().realizeTopology(state);
