@@ -673,7 +673,7 @@ void LocalGeodesic::realizeTopology(State& s)
 {
     // Allocate an auto-update discrete variable for the last computed geodesic.
     CacheEntry cache{};
-    m_CacheIx = m_Subsystem.allocateAutoUpdateDiscreteVariable(
+    m_CacheIx = updSubsystem().allocateAutoUpdateDiscreteVariable(
         s,
         Stage::Velocity,
         new Value<CacheEntry>(cache),
@@ -682,9 +682,9 @@ void LocalGeodesic::realizeTopology(State& s)
 
 void LocalGeodesic::realizePosition(const State& s) const
 {
-    if (!m_Subsystem.isDiscreteVarUpdateValueRealized(s, m_CacheIx)) {
+    if (!getSubsystem().isDiscreteVarUpdateValueRealized(s, m_CacheIx)) {
         updCacheEntry(s) = getPrevCacheEntry(s);
-        m_Subsystem.markDiscreteVarUpdateValueRealized(s, m_CacheIx);
+        getSubsystem().markDiscreteVarUpdateValueRealized(s, m_CacheIx);
     }
 }
 
@@ -699,7 +699,7 @@ const LocalGeodesicInfo& LocalGeodesic::calcInitialGeodesic(
     CacheEntry& cache = updPrevCacheEntry(s);
     shootNewGeodesic(g0, cache);
     updCacheEntry(s) = cache;
-    m_Subsystem.markDiscreteVarUpdateValueRealized(s, m_CacheIx);
+    getSubsystem().markDiscreteVarUpdateValueRealized(s, m_CacheIx);
     return getCacheEntry(s);
 }
 
@@ -954,19 +954,18 @@ CurveSegment::Impl::Impl(
     const Transform& X_BS,
     ContactGeometry geometry,
     Vec3 initPointGuess) :
-    m_Subsystem(path.getImpl().getSubsystem()),
-    m_Path(path),
-    m_Index(-1), // TODO what to do with this index, and when
-    m_Mobod(mobod),
-    m_Offset(X_BS),
-    m_Geodesic(m_Subsystem, geometry, initPointGuess)
+    m_Subsystem(&path.updImpl().updSubsystem()),
+    m_Path(path), m_Index(-1), // TODO what to do with this index, and when
+    m_Mobod(mobod), m_Offset(X_BS),
+    m_Geodesic(path.updImpl().updSubsystem(), geometry, initPointGuess)
 {}
 
 void CurveSegment::Impl::realizeTopology(State& s)
 {
-    // Allocate position level cache.
+    m_Geodesic.realizeTopology(s);
+
     PosInfo posInfo{};
-    m_PosInfoIx = m_Subsystem.allocateCacheEntry(
+    m_PosInfoIx = updSubsystem().allocateCacheEntry(
         s,
         Stage::Position,
         new Value<PosInfo>(posInfo));
@@ -974,9 +973,9 @@ void CurveSegment::Impl::realizeTopology(State& s)
 
 void CurveSegment::Impl::realizePosition(const State& s) const
 {
-    if (!m_Subsystem.isCacheValueRealized(s, m_PosInfoIx)) {
+    if (!getSubsystem().isCacheValueRealized(s, m_PosInfoIx)) {
         calcPosInfo(s, updPosInfo(s));
-        m_Subsystem.markCacheValueRealized(s, m_PosInfoIx);
+        getSubsystem().markCacheValueRealized(s, m_PosInfoIx);
     }
 }
 
@@ -987,7 +986,7 @@ void CurveSegment::Impl::realizeCablePosition(const State& s) const
 
 void CurveSegment::Impl::invalidatePositionLevelCache(const State& state) const
 {
-    m_Subsystem.markCacheValueNotRealized(state, m_PosInfoIx);
+    getSubsystem().markCacheValueNotRealized(state, m_PosInfoIx);
     m_Path.getImpl().invalidatePositionLevelCache(state);
 }
 
@@ -1168,7 +1167,6 @@ void addPathErrorJacobian(
 {
     addDirectionJacobian(e, axis, dK[1], AddBlock, invertV);
     AddBlock(~dK[0] * cross(axis, e.d));
-    
 }
 
 } // namespace
@@ -1178,7 +1176,7 @@ void addPathErrorJacobian(
 //==============================================================================
 
 CableSpan::CableSpan(
-    CableSubsystem subsystem,
+    CableSubsystem& subsystem,
     const MobilizedBody& originBody,
     const Vec3& defaultOriginPoint,
     const MobilizedBody& terminationBody,
@@ -1189,7 +1187,9 @@ CableSpan::CableSpan(
         defaultOriginPoint,
         terminationBody,
         defaultTerminationPoint)))
-{}
+{
+    subsystem.updImpl().adoptCablePath(*this);
+}
 
 CurveSegmentIndex CableSpan::adoptSegment(const CurveSegment& segment)
 {
@@ -1238,14 +1238,18 @@ void CableSpan::applyBodyForces(
 
 void CableSpan::Impl::realizeTopology(State& s)
 {
+    for (CurveSegment segment : m_CurveSegments) {
+        segment.updImpl().realizeTopology(s);
+    }
+
     PosInfo posInfo{};
-    m_PosInfoIx = m_Subsystem.allocateCacheEntry(
+    m_PosInfoIx = updSubsystem().allocateCacheEntry(
         s,
         Stage::Position,
         new Value<PosInfo>(posInfo));
 
     VelInfo velInfo{};
-    m_VelInfoIx = m_Subsystem.allocateCacheEntry(
+    m_VelInfoIx = updSubsystem().allocateCacheEntry(
         s,
         Stage::Velocity,
         new Value<VelInfo>(velInfo));
@@ -1253,51 +1257,53 @@ void CableSpan::Impl::realizeTopology(State& s)
 
 void CableSpan::Impl::realizePosition(const State& s) const
 {
-    if (m_Subsystem.isCacheValueRealized(s, m_PosInfoIx)) {
+    if (getSubsystem().isCacheValueRealized(s, m_PosInfoIx)) {
         return;
     }
     calcPosInfo(s, updPosInfo(s));
-    m_Subsystem.markCacheValueRealized(s, m_PosInfoIx);
+    getSubsystem().markCacheValueRealized(s, m_PosInfoIx);
 }
 
 void CableSpan::Impl::realizeVelocity(const State& s) const
 {
-    if (m_Subsystem.isCacheValueRealized(s, m_VelInfoIx)) {
+    if (getSubsystem().isCacheValueRealized(s, m_VelInfoIx)) {
         return;
     }
     calcVelInfo(s, updVelInfo(s));
-    m_Subsystem.markCacheValueRealized(s, m_VelInfoIx);
+    getSubsystem().markCacheValueRealized(s, m_VelInfoIx);
 }
 
 void CableSpan::Impl::invalidatePositionLevelCache(const State& s) const
 {
-    m_Subsystem.markCacheValueNotRealized(s, m_PosInfoIx);
+    getSubsystem().markCacheValueNotRealized(s, m_PosInfoIx);
 }
 
 const CableSpan::Impl::PosInfo& CableSpan::Impl::getPosInfo(
     const State& s) const
 {
     realizePosition(s);
-    return Value<PosInfo>::downcast(m_Subsystem.getCacheEntry(s, m_PosInfoIx));
+    return Value<PosInfo>::downcast(
+        getSubsystem().getCacheEntry(s, m_PosInfoIx));
 }
 
 CableSpan::Impl::PosInfo& CableSpan::Impl::updPosInfo(const State& s) const
 {
     return Value<PosInfo>::updDowncast(
-        m_Subsystem.updCacheEntry(s, m_PosInfoIx));
+        getSubsystem().updCacheEntry(s, m_PosInfoIx));
 }
 
 const CableSpan::Impl::VelInfo& CableSpan::Impl::getVelInfo(
     const State& s) const
 {
     realizeVelocity(s);
-    return Value<VelInfo>::downcast(m_Subsystem.getCacheEntry(s, m_VelInfoIx));
+    return Value<VelInfo>::downcast(
+        getSubsystem().getCacheEntry(s, m_VelInfoIx));
 }
 
 CableSpan::Impl::VelInfo& CableSpan::Impl::updVelInfo(const State& s) const
 {
     return Value<VelInfo>::updDowncast(
-        m_Subsystem.updCacheEntry(s, m_VelInfoIx));
+        getSubsystem().updCacheEntry(s, m_VelInfoIx));
 }
 
 void CableSpan::Impl::calcInitCablePath(State& s) const
@@ -1545,7 +1551,8 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         const size_t nActive = countActive(s);
 
         // Grab the shared data cache for computing the matrices, and lock it.
-        SolverData& data = m_Subsystem.getImpl().updCacheEntry(s).updOrInsert(nActive);
+        SolverData& data =
+            getSubsystem().getImpl().updCacheEntry(s).updOrInsert(nActive);
 
         // Compute the straight-line segments.
         calcLineSegments(s, x_O, x_I, data.lineSegments);

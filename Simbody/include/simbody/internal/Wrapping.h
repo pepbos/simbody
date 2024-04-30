@@ -97,7 +97,7 @@ public:
 
 public:
     CableSpan(
-        CableSubsystem subsystem,
+        CableSubsystem& subsystem,
         const MobilizedBody& originBody,
         const Vec3& defaultOriginPoint,
         const MobilizedBody& terminationBody,

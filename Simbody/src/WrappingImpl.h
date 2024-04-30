@@ -47,10 +47,10 @@ public:
         LocalGeodesic& operator=(const LocalGeodesic&)     = delete;
 
         LocalGeodesic(
-            CableSubsystem subsystem,
+            CableSubsystem& subsystem,
             ContactGeometry geometry,
             Vec3 initPointGuess) :
-            m_Subsystem(subsystem),
+            m_Subsystem(&subsystem),
             m_Geometry(geometry), m_InitPointGuess(initPointGuess)
         {}
 
@@ -157,6 +157,9 @@ public:
             FrenetFrame frame;
         };
 
+        CableSubsystem& updSubsystem() {return *m_Subsystem;}
+        const CableSubsystem& getSubsystem() const {return *m_Subsystem;}
+
     private:
         // The cache entry: Curve in local surface coordinated.
         // This is an auto update discrete cache variable, which makes it
@@ -172,25 +175,25 @@ public:
         const CacheEntry& getCacheEntry(const State& state) const
         {
             return Value<CacheEntry>::downcast(
-                m_Subsystem.getDiscreteVarUpdateValue(state, m_CacheIx));
+                m_Subsystem->getDiscreteVarUpdateValue(state, m_CacheIx));
         }
 
         CacheEntry& updCacheEntry(const State& state) const
         {
             return Value<CacheEntry>::updDowncast(
-                m_Subsystem.updDiscreteVarUpdateValue(state, m_CacheIx));
+                m_Subsystem->updDiscreteVarUpdateValue(state, m_CacheIx));
         }
 
         const CacheEntry& getPrevCacheEntry(const State& state) const
         {
             return Value<CacheEntry>::downcast(
-                m_Subsystem.getDiscreteVariable(state, m_CacheIx));
+                m_Subsystem->getDiscreteVariable(state, m_CacheIx));
         }
 
         CacheEntry& updPrevCacheEntry(State& state) const
         {
             return Value<CacheEntry>::updDowncast(
-                m_Subsystem.updDiscreteVariable(state, m_CacheIx));
+                m_Subsystem->updDiscreteVariable(state, m_CacheIx));
         }
 
         void calcCacheEntry(
@@ -216,7 +219,7 @@ public:
             CacheEntry& cache) const;
 
         //------------------------------------------------------------------------------
-        CableSubsystem m_Subsystem;
+        CableSubsystem* m_Subsystem; // TODO just a pointer?
 
         ContactGeometry m_Geometry;
 
@@ -292,7 +295,7 @@ public:
     {
         realizePosition(s);
         return Value<PosInfo>::downcast(
-            m_Subsystem.getCacheEntry(s, m_PosInfoIx));
+            m_Subsystem->getCacheEntry(s, m_PosInfoIx));
     }
 
     bool isActive(const State& s) const
@@ -355,17 +358,20 @@ public:
     // TODO allow for user to shoot his own geodesic.
     /* void calcGeodesic(State& state, Vec3 x, Vec3 t, Real l) const; */
 
+    CableSubsystem& updSubsystem() {return *m_Subsystem;}
+    const CableSubsystem& getSubsystem() const {return *m_Subsystem;}
+
 private:
     PosInfo& updPosInfo(const State& state) const
     {
         return Value<PosInfo>::updDowncast(
-            m_Subsystem.updCacheEntry(state, m_PosInfoIx));
+            m_Subsystem->updCacheEntry(state, m_PosInfoIx));
     }
 
     void calcPosInfo(const State& state, PosInfo& posInfo) const;
 
     // TODO Required for accessing the cache variable?
-    CableSubsystem m_Subsystem; // The subsystem this segment belongs to.
+    CableSubsystem* m_Subsystem; // The subsystem this segment belongs to.
     CableSpan m_Path;           // The path this segment belongs to.
     CurveSegmentIndex m_Index;  // The index in its path.
 
@@ -389,12 +395,12 @@ class CableSpan::Impl
 {
 public:
     Impl(
-        CableSubsystem subsystem,
+        CableSubsystem& subsystem,
         MobilizedBody originBody,
         Vec3 originPoint,
         MobilizedBody terminationBody,
         Vec3 terminationPoint) :
-        m_Subsystem(subsystem),
+        m_Subsystem(&subsystem),
         m_OriginBody(originBody), m_OriginPoint(originPoint),
         m_TerminationBody(terminationBody), m_TerminationPoint(terminationPoint)
     {}
@@ -438,7 +444,7 @@ public:
     void realizeVelocity(const State& state) const;
     void invalidateTopology()
     {
-        m_Subsystem.invalidateSubsystemTopologyCache();
+        m_Subsystem->invalidateSubsystemTopologyCache();
     }
     void invalidatePositionLevelCache(const State& state) const;
 
@@ -499,11 +505,16 @@ private:
 
     const CableSubsystem& getSubsystem() const
     {
-        return m_Subsystem;
+        return *m_Subsystem;
+    }
+
+    CableSubsystem& updSubsystem()
+    {
+        return *m_Subsystem;
     }
 
     // Reference back to the subsystem.
-    CableSubsystem m_Subsystem;
+    CableSubsystem* m_Subsystem; // TODO just a pointer?
 
     MobilizedBody m_OriginBody;
     Vec3 m_OriginPoint;
