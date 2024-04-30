@@ -1260,7 +1260,7 @@ GeodesicJacobian addPathErrorJacobian(
 //==============================================================================
 
 CableSpan::CableSpan(
-    CableSubsystem& subsystem,
+    CableSubsystem subsystem,
     const MobilizedBody& originBody,
     const Vec3& defaultOriginPoint,
     const MobilizedBody& terminationBody,
@@ -1276,6 +1276,15 @@ CableSpan::CableSpan(
 CurveSegmentIndex CableSpan::adoptSegment(const CurveSegment& segment)
 {
     return updImpl().adoptSegment(segment);
+}
+
+void CableSpan::adoptWrappingObstacle(
+        const MobilizedBody& mobod,
+        Transform X_BS,
+        const ContactGeometry& geometry,
+        Vec3 contactPointHint)
+{
+    CurveSegment(*this, mobod, X_BS, geometry, contactPointHint);
 }
 
 int CableSpan::getNumCurveSegments() const

@@ -93,7 +93,7 @@ public:
 
 public:
     CableSpan(
-        CableSubsystem& subsystem,
+        CableSubsystem subsystem,
         const MobilizedBody& originBody,
         const Vec3& defaultOriginPoint,
         const MobilizedBody& terminationBody,
@@ -101,12 +101,19 @@ public:
 
     CurveSegmentIndex adoptSegment(const CurveSegment& segment);
 
+    void adoptWrappingObstacle(
+        const MobilizedBody& mobod,
+        Transform X_BS,
+        const ContactGeometry& geometry,
+        Vec3 contactPointHint = {1., 0., 0.});
+
     int getNumCurveSegments() const;
 
     const CurveSegment& getCurveSegment(CurveSegmentIndex ix) const;
 
     Real getLength(const State& state) const;
     Real getLengthDot(const State& state) const;
+    Real calcCablePower(const State& state, Real tension) const {return NaN;}
 
     void applyBodyForces(
         const State& state,
