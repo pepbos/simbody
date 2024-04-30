@@ -674,6 +674,10 @@ void LocalGeodesic::realizeTopology(State& s)
 {
     // Allocate an auto-update discrete variable for the last computed geodesic.
     Value<CacheEntry>* cache = new Value<CacheEntry>();
+    cache->upd().length = 0.;
+    cache->upd().status = Status::Liftoff;
+    cache->upd().trackingPointOnLine = getInitialPointGuess();
+
     m_CacheIx = updSubsystem().allocateAutoUpdateDiscreteVariable(
         s,
         Stage::Report,
