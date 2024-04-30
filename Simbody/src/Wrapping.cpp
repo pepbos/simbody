@@ -23,14 +23,14 @@ using PointVariation   = ContactGeometry::GeodesicPointVariation;
 using Variation        = ContactGeometry::GeodesicVariation;
 using LineSegment      = CableSpan::LineSegment;
 using Status           = CurveSegment::Status;
-using SolverData = CableSubsystem::Impl::SolverData;
+using SolverData       = CableSubsystem::Impl::SolverData;
 
 //==============================================================================
 //                                CONSTANTS
 //==============================================================================
 namespace
 {
-static const int GeodesicDOF             = 4;
+static const int GeodesicDOF = 4;
 } // namespace
 
 //==============================================================================
@@ -507,9 +507,9 @@ void calcGeodesicBoundaryState(
     v.col(2) = b * q.r;
     v.col(3) = isEnd ? v.col(0) : Vec3{0.};
 
-    const Real tau_g   = geometry.calcGeodesicTorsion(q.x, t);
-    const Real kappa_n = geometry.calcNormalCurvature(q.x, t);
-    const Real kappa_a = geometry.calcNormalCurvature(q.x, b);
+    const Real tau_g   = calcGeodesicTorsion(geometry, q.x, t);
+    const Real kappa_n = calcNormalCurvature(geometry, q.x, t);
+    const Real kappa_a = calcNormalCurvature(geometry, q.x, b);
 
     w.col(0) = tau_g * t + kappa_n * b;
     w.col(1) = -q.a * kappa_a * t - q.aDot * n - q.a * tau_g * b;
@@ -568,7 +568,8 @@ void calcGeodesicAndVariationImplicitly(
 //                                SOLVER
 //==============================================================================
 
-namespace{
+namespace
+{
 
 const Correction* calcPathCorrections(SolverData& data)
 {
