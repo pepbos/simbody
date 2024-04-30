@@ -175,25 +175,25 @@ public:
         const CacheEntry& getCacheEntry(const State& state) const
         {
             return Value<CacheEntry>::downcast(
-                m_Subsystem->getDiscreteVarUpdateValue(state, m_CacheIx));
+                getSubsystem().getDiscreteVarUpdateValue(state, m_CacheIx));
         }
 
         CacheEntry& updCacheEntry(const State& state) const
         {
             return Value<CacheEntry>::updDowncast(
-                m_Subsystem->updDiscreteVarUpdateValue(state, m_CacheIx));
+                getSubsystem().updDiscreteVarUpdateValue(state, m_CacheIx));
         }
 
         const CacheEntry& getPrevCacheEntry(const State& state) const
         {
             return Value<CacheEntry>::downcast(
-                m_Subsystem->getDiscreteVariable(state, m_CacheIx));
+                getSubsystem().getDiscreteVariable(state, m_CacheIx));
         }
 
         CacheEntry& updPrevCacheEntry(State& state) const
         {
             return Value<CacheEntry>::updDowncast(
-                m_Subsystem->updDiscreteVariable(state, m_CacheIx));
+                getSubsystem().updDiscreteVariable(state, m_CacheIx));
         }
 
         void calcCacheEntry(
@@ -295,7 +295,7 @@ public:
     {
         realizePosition(s);
         return Value<PosInfo>::downcast(
-            m_Subsystem->getCacheEntry(s, m_PosInfoIx));
+            getSubsystem().getCacheEntry(s, m_PosInfoIx));
     }
 
     bool isActive(const State& s) const
@@ -365,7 +365,7 @@ private:
     PosInfo& updPosInfo(const State& state) const
     {
         return Value<PosInfo>::updDowncast(
-            m_Subsystem->updCacheEntry(state, m_PosInfoIx));
+            getSubsystem().updCacheEntry(state, m_PosInfoIx));
     }
 
     void calcPosInfo(const State& state, PosInfo& posInfo) const;
@@ -444,7 +444,7 @@ public:
     void realizeVelocity(const State& state) const;
     void invalidateTopology()
     {
-        m_Subsystem->invalidateSubsystemTopologyCache();
+        getSubsystem().invalidateSubsystemTopologyCache();
     }
     void invalidatePositionLevelCache(const State& state) const;
 
