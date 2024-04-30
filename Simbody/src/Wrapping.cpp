@@ -736,7 +736,6 @@ void LocalGeodesic::applyGeodesicCorrection(const State& s, const Correction& c)
 void LocalGeodesic::calcPathPoints(const State& s, std::vector<Vec3>& points)
     const
 {
-    realizePosition(s);
     const CacheEntry& cache = getCacheEntry(s);
 
     if (analyticFormAvailable()) {
@@ -1431,11 +1430,10 @@ void CableSpan::Impl::calcPathErrorJacobian(
         const CurveSegment* prev   = findPrevActiveCurveSegment(s, ix);
         const CurveSegment* next   = findNextActiveCurveSegment(s, ix);
 
-        int blkCol = col;
-        std::function<void(const Vec4&)> AddBlock = [&](const Vec4& block)
-        {
+        int blkCol                                = col;
+        std::function<void(const Vec4&)> AddBlock = [&](const Vec4& block) {
             for (int ix = 0; ix < 4; ++ix) {
-                J[row][blkCol+ix] = block[ix];
+                J[row][blkCol + ix] = block[ix];
             }
         };
 
@@ -1447,13 +1445,8 @@ void CableSpan::Impl::calcPathErrorJacobian(
 
             if (prev) {
                 const Variation& prev_dK_Q = prev->getImpl().getPosInfo(s).dKQ;
-                blkCol = col - Nq;
-                addDirectionJacobian(
-                    l_P,
-                    a_P,
-                    prev_dK_Q[1],
-                    AddBlock,
-                    true);
+                blkCol                     = col - Nq;
+                addDirectionJacobian(l_P, a_P, prev_dK_Q[1], AddBlock, true);
             }
             ++row;
         }
@@ -1463,21 +1456,12 @@ void CableSpan::Impl::calcPathErrorJacobian(
             const Variation& dK_Q = g.dKQ;
 
             blkCol = col;
-            addPathErrorJacobian(
-                l_Q,
-                a_Q,
-                dK_Q,
-                AddBlock,
-                true);
+            addPathErrorJacobian(l_Q, a_Q, dK_Q, AddBlock, true);
 
             if (next) {
                 const Variation& next_dK_P = next->getImpl().getPosInfo(s).dKP;
-                blkCol = col + Nq;
-                addDirectionJacobian(
-                    l_Q,
-                    a_Q,
-                    next_dK_P[1],
-                    AddBlock);
+                blkCol                     = col + Nq;
+                addDirectionJacobian(l_Q, a_Q, next_dK_P[1], AddBlock);
             }
             ++row;
         }
@@ -1549,15 +1533,23 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         m_TerminationBody.getBodyTransform(s).shiftFrameStationToBase(
             m_TerminationPoint);
 
+    posInfo.xO = x_O;
+    posInfo.xI = x_I;
+
     const std::array<CoordinateAxis, 2> axes{NormalAxis, BinormalAxis};
 
     for (posInfo.loopIter = 0; posInfo.loopIter < m_PathMaxIter;
          ++posInfo.loopIter) {
         const size_t nActive = countActive(s);
 
+        if (nActive == 0) {
+            posInfo.l = (x_I - x_O).norm();
+            return;
+        }
+
         // Grab the shared data cache for computing the matrices, and lock it.
         SolverData& data =
-            getSubsystem().getImpl().updCacheEntry(s).updOrInsert(nActive);
+            getSubsystem().getImpl().updCachedScratchboard(s).updOrInsert(nActive);
 
         // Compute the straight-line segments.
         calcLineSegments(s, x_O, x_I, data.lineSegments);
@@ -1566,15 +1558,22 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         calcPathErrorVector<2>(s, data.lineSegments, axes, data.pathError);
         const Real maxPathError = data.pathError.normInf();
         if (maxPathError < m_PathErrorBound) {
+            posInfo.l = 0.;
+            for (const LineSegment& line: data.lineSegments) {
+                posInfo.l += line.l;
+            }
+            for (const CurveSegment& curve: m_CurveSegments) {
+                posInfo.l += curve.getImpl().getPosInfo(s).length;
+            }
             return;
         }
 
         // Evaluate the path error jacobian.
         calcPathErrorJacobian<2>(
-                s,
-                data.lineSegments,
-                axes,
-                data.pathErrorJacobian);
+            s,
+            data.lineSegments,
+            axes,
+            data.pathErrorJacobian);
 
         // Compute path corrections.
         const Correction* corrIt = calcPathCorrections(data);

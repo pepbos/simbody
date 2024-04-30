@@ -69,7 +69,7 @@ public:
             Variation dK_P{};
             Variation dK_Q{};
 
-            Status status = Status::Ok;
+            Status status = Status::Liftoff;
         };
 
         // Helper struct: Required data for shooting a new geodesic.
@@ -111,7 +111,7 @@ public:
         }
 
         const LocalGeodesicInfo& calcInitialGeodesic(
-            State& s,
+            const State& s,
             const GeodesicInitialConditions& g0) const;
 
         // This will reevaluate the cached geodesic and status.
@@ -170,11 +170,11 @@ public:
             Vec3 trackingPointOnLine{NaN, NaN, NaN};
             std::vector<LocalGeodesicSample> samples;
             double sHint = NaN;
+            int count = 0;
         };
 
         const CacheEntry& getCacheEntry(const State& s) const
         {
-            std::cout << "LocalGeodesic::getCacheEntry\n";
             realizePosition(s);
             return Value<CacheEntry>::downcast(
                 getSubsystem().getDiscreteVarUpdateValue(s, m_CacheIx));
@@ -302,6 +302,7 @@ public:
 
     bool isActive(const State& s) const
     {
+        realizePosition(s);
         return m_Geodesic.getStatus(s) == Status::Ok;
     }
 
@@ -310,7 +311,7 @@ public:
         return m_Geodesic.getStatus(s);
     }
 
-    void calcInitZeroLengthGeodesic(State& state, Vec3 prev_QS) const;
+    void calcInitZeroLengthGeodesic(const State& state, Vec3 prev_QS) const;
 
     void applyGeodesicCorrection(
         const State& state,
@@ -669,22 +670,16 @@ class CableSubsystem::Impl : public Subsystem::Guts
     void realizeTopology(State& state)
     {
         CacheEntry cache{};
-        m_CacheIx = allocateDiscreteVariable(
+        m_CacheIx = allocateCacheEntry(
                 state,
-                Stage::Velocity,
+                Stage::Instance,
+                Stage::Infinity,
                 new Value<CacheEntry>(cache));
     }
 
-    const CacheEntry& getCacheEntry(const State& state) const
+    CacheEntry& updCachedScratchboard(const State& state) const
     {
-        return Value<CacheEntry>::downcast(
-                getDiscreteVarUpdateValue(state, m_CacheIx));
-    }
-
-    CacheEntry& updCacheEntry(const State& state) const
-    {
-        return Value<CacheEntry>::updDowncast(
-                updDiscreteVarUpdateValue(state, m_CacheIx));
+        return Value<CacheEntry>::updDowncast(updCacheEntry(state, m_CacheIx));
     }
 
     SimTK_DOWNCAST(Impl, Subsystem::Guts);
@@ -693,7 +688,7 @@ private:
     // TOPOLOGY STATE
     Array_<CableSpan, CableSpanIndex> cables;
 
-    DiscreteVariableIndex m_CacheIx;
+    CacheEntryIndex m_CacheIx;
 };
 
 } // namespace SimTK
