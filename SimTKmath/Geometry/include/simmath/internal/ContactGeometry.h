@@ -48,6 +48,10 @@ class OBBTreeNodeImpl;
 class OBBTree;
 class Plane;
 
+static const CoordinateAxis TangentAxis = CoordinateAxis::XCoordinateAxis();
+static const CoordinateAxis NormalAxis = CoordinateAxis::YCoordinateAxis();
+static const CoordinateAxis BinormalAxis = CoordinateAxis::ZCoordinateAxis();
+
 
 
 //==============================================================================
@@ -118,10 +122,6 @@ class Cylinder;
 class Brick;
 class TriangleMesh;
 
-static const CoordinateAxis TangentAxis;
-static const CoordinateAxis NormalAxis;
-static const CoordinateAxis BinormalAxis;
-
 static constexpr int GEODESIC_DOF = 4;
 
 using FrenetFrame = Transform;
@@ -140,62 +140,62 @@ using GeodesicFrameVariation = Mat34;
 using GeodesicVariation = std::array<Mat34, 2>;
 using GeodesicCorrection = Vec4;
 
-bool analyticFormAvailable() const;
+/* bool analyticFormAvailable() const; */
 
-void calcGeodesicWithVariationAnalytically(
-    Vec3 xGuess,
-    Vec3 tGuess,
-    Real l,
-    FrenetFrame& K_P,
-    GeodesicVariation& dK_P,
-    FrenetFrame& K_Q,
-    GeodesicVariation& dK_Q) const;
+/* void calcGeodesicWithVariationAnalytically( */
+/*     Vec3 xGuess, */
+/*     Vec3 tGuess, */
+/*     Real l, */
+/*     FrenetFrame& K_P, */
+/*     GeodesicVariation& dK_P, */
+/*     FrenetFrame& K_Q, */
+/*     GeodesicVariation& dK_Q) const; */
 
-void resampleGeodesicPointsAnalytically(
-    const FrenetFrame& K_P,
-    const FrenetFrame& K_Q,
-    Real l,
-    size_t size,
-    std::vector<Vec3>& points) const;
+/* void resampleGeodesicPointsAnalytically( */
+/*     const FrenetFrame& K_P, */
+/*     const FrenetFrame& K_Q, */
+/*     Real l, */
+/*     size_t size, */
+/*     std::vector<Vec3>& points) const; */
 
-void resampleGeodesicFramesAnalytically(
-    const FrenetFrame& K_P,
-    const FrenetFrame& K_Q,
-    Real l,
-    size_t size,
-    std::vector<FrenetFrame>& frames) const;
+/* void resampleGeodesicFramesAnalytically( */
+/*     const FrenetFrame& K_P, */
+/*     const FrenetFrame& K_Q, */
+/*     Real l, */
+/*     size_t size, */
+/*     std::vector<FrenetFrame>& frames) const; */
 
-size_t calcNearestFrenetFrameImplicitlyFast(
-    Vec3 xGuess,
-    Vec3 tGuess,
-    FrenetFrame& K_P,
-    size_t maxIter,
-    Real eps) const;
+/* size_t calcNearestFrenetFrameImplicitlyFast( */
+/*     Vec3 xGuess, */
+/*     Vec3 tGuess, */
+/*     FrenetFrame& K_P, */
+/*     size_t maxIter, */
+/*     Real eps) const; */
 
-void calcGeodesicStartFrameVariationImplicitly(
-    const FrenetFrame& K_P,
-    GeodesicVariation& dK_P) const;
+/* void calcGeodesicStartFrameVariationImplicitly( */
+/*     const FrenetFrame& K_P, */
+/*     GeodesicVariation& dK_P) const; */
 
-void calcGeodesicEndFrameVariationImplicitly(
-    const FrenetFrame& KP,
-    Real l,
-    FrenetFrame& K_Q,
-    GeodesicVariation& dK_Q,
-    Real initStepSize,
-    Real accuracy,
-    std::vector<FrenetFrame>& frames) const;
+/* void calcGeodesicEndFrameVariationImplicitly( */
+/*     const FrenetFrame& KP, */
+/*     Real l, */
+/*     FrenetFrame& K_Q, */
+/*     GeodesicVariation& dK_Q, */
+/*     Real initStepSize, */
+/*     Real accuracy, */
+/*     std::vector<FrenetFrame>& frames) const; */
 
-bool calcNearestPointOnLineImplicitly(
-    Vec3 a,
-    Vec3 b,
-    Vec3& point,
-    size_t maxIter,
-    double eps) const;
+/* bool calcNearestPointOnLineImplicitly( */
+/*     Vec3 a, */
+/*     Vec3 b, */
+/*     Vec3& point, */
+/*     size_t maxIter, */
+/*     double eps) const; */
 
-bool calcNearestPointOnLineAnalytically(
-    Vec3 a,
-    Vec3 b,
-    Vec3& point) const;
+/* bool calcNearestPointOnLineAnalytically( */
+/*     Vec3 a, */
+/*     Vec3 b, */
+/*     Vec3& point) const; */
 
 Real calcNormalCurvature(Vec3 x, UnitVec3 t) const;
 Real calcGeodesicTorsion(Vec3 x, UnitVec3 t) const;
