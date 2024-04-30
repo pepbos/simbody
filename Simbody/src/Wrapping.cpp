@@ -1,5 +1,3 @@
-#include "Wrapping.h"
-
 #include "SimTKcommon/internal/CoordinateAxis.h"
 #include "SimTKcommon/internal/ExceptionMacros.h"
 #include "SimTKmath.h"
@@ -25,15 +23,13 @@ using PointVariation   = ContactGeometry::GeodesicPointVariation;
 using Variation        = ContactGeometry::GeodesicVariation;
 using LineSegment      = CableSpan::LineSegment;
 using Status           = CurveSegment::Status;
+using SolverData = CableSubsystem::Impl::SolverData;
 
 //==============================================================================
 //                                CONSTANTS
 //==============================================================================
 namespace
 {
-static const CoordinateAxis TangentAxis  = ContactGeometry::TangentAxis;
-static const CoordinateAxis NormalAxis   = ContactGeometry::NormalAxis;
-static const CoordinateAxis BinormalAxis = ContactGeometry::BinormalAxis;
 static const int GeodesicDOF             = 4;
 } // namespace
 
@@ -506,7 +502,7 @@ void calcGeodesicBoundaryState(
     const UnitVec3& b = K.R().getAxisUnitVec(BinormalAxis);
 
     // TODO remove fourth element?
-    v.col(0) = t;
+    v.col(0) = Vec3{t};
     v.col(1) = b * q.a;
     v.col(2) = b * q.r;
     v.col(3) = isEnd ? v.col(0) : Vec3{0.};
@@ -550,7 +546,7 @@ void calcGeodesicAndVariationImplicitly(
     std::function<void(Real, const Y&)> m = [&](Real l, const Y& q) {
         FrenetFrame frame;
         calcFrenetFrame(geometry, q, frame);
-        log.emplace_back(l, frame);
+        log.push_back(LocalGeodesicSample(l, frame));
     };
 
     Y y0(x, t);
@@ -572,79 +568,7 @@ void calcGeodesicAndVariationImplicitly(
 //                                SOLVER
 //==============================================================================
 
-namespace
-{
-class SolverDataCache;
-SolverDataCache& findDataCache(size_t nActive);
-
-struct SolverData
-{
-    std::vector<LineSegment> lineSegments;
-
-    Matrix pathErrorJacobian;
-    Vector pathCorrection;
-    Vector pathError;
-    Matrix mat;
-    // TODO Cholesky decomposition...
-    FactorLU matInv;
-    Vector vec;
-};
-
-class SolverDataCache
-{
-private:
-    SolverDataCache(size_t n)
-    {
-        static constexpr int Q = 4;
-        static constexpr int C = 4;
-
-        m_Data.lineSegments.resize(n + 1);
-        m_Data.pathErrorJacobian = Matrix(C * n, Q * n, 0.);
-        m_Data.pathCorrection    = Vector(Q * n, 0.);
-        m_Data.pathError         = Vector(C * n, 0.);
-        m_Data.mat               = Matrix(Q * n, Q * n, NaN);
-        m_Data.vec               = Vector(Q * n, NaN);
-    }
-
-public:
-    void lock()
-    {
-        m_Mutex.lock();
-    }
-
-    void unlock()
-    {
-        m_Mutex.unlock();
-    }
-
-    SolverData& updData()
-    {
-        return m_Data;
-    }
-
-private:
-    SolverData m_Data;
-    std::mutex m_Mutex{};
-
-    friend SolverDataCache& findDataCache(size_t nActive);
-};
-
-SolverDataCache& findDataCache(size_t nActive)
-{
-    static std::vector<SolverDataCache> s_GlobalCache{};
-    static std::mutex s_GlobalLock{};
-
-    {
-        std::lock_guard<std::mutex> lock(s_GlobalLock);
-
-        for (size_t i = s_GlobalCache.size(); i < nActive - 1; ++i) {
-            int n = i + 1;
-            s_GlobalCache.emplace_back(nActive);
-        }
-    }
-
-    return s_GlobalCache.at(nActive - 1);
-}
+namespace{
 
 const Correction* calcPathCorrections(SolverData& data)
 {
@@ -684,7 +608,7 @@ GeodesicInitialConditions GeodesicInitialConditions::CreateCorrected(
     g0.x   = KP.p() + v;
 
     Vec3 w           = dKP[0] * c;
-    const UnitVec3 t = KP.R().getAxisUnitVec(ContactGeometry::TangentAxis);
+    const UnitVec3 t = KP.R().getAxisUnitVec(TangentAxis);
     g0.t             = t + cross(w, t);
 
     // Take the length correction, and add to the current length.
@@ -776,6 +700,7 @@ const LocalGeodesicInfo& LocalGeodesic::calcInitialGeodesic(
     shootNewGeodesic(g0, cache);
     updCacheEntry(s) = cache;
     m_Subsystem.markDiscreteVarUpdateValueRealized(s, m_CacheIx);
+    return getCacheEntry(s);
 }
 
 const LocalGeodesicInfo& LocalGeodesic::calcLocalGeodesicInfo(
@@ -813,12 +738,12 @@ void LocalGeodesic::calcPathPoints(const State& s, std::vector<Vec3>& points)
 
     if (analyticFormAvailable()) {
         throw std::runtime_error("NOTYETIMPLEMENTED");
-        m_Geometry.resampleGeodesicPointsAnalytically(
-            cache.K_P,
-            cache.K_Q,
-            cache.length,
-            m_NumberOfAnalyticPoints,
-            points);
+    /*     m_Geometry.resampleGeodesicPointsAnalytically( */
+    /*         cache.K_P, */
+    /*         cache.K_Q, */
+    /*         cache.length, */
+    /*         m_NumberOfAnalyticPoints, */
+    /*         points); */
     } else {
         for (const LocalGeodesicSample& sample : cache.samples) {
             points.push_back(sample.frame.p());
@@ -870,7 +795,7 @@ void LocalGeodesic::calcTouchdownIfNeeded(
     // Detect touchdown by computing the point on the line from x_QS to x_PS
     // that is nearest to the surface.
     bool touchdownDetected;
-    if (m_Geometry.analyticFormAvailable()) {
+    if (analyticFormAvailable()) {
         throw std::runtime_error("NOTYETIMPLEMENTED");
         /* touchdownDetected = m_Geometry.calcNearestPointOnLineAnalytically( */
         /*     prev_QS, */
@@ -948,7 +873,7 @@ void LocalGeodesic::shootNewGeodesic(
         cache.samples);
 
     /* using Y  = ImplicitGeodesicState; */
-    /* if (m_Geometry.analyticFormAvailable()) { */
+    /* if (analyticFormAvailable()) { */
 
     /*     m_Geometry.calcGeodesicWithVariationAnalytically( */
     /*         g0.x, */
@@ -1217,24 +1142,16 @@ namespace
 
 static const int N_PATH_CONSTRAINTS = 4;
 
-// TODO this is awkward
-void addBlock(const Vec4& values, Matrix& block)
-{
-    for (int i = 0; i < Vec4::size(); ++i) {
-        block[0][i] = values[i];
-    }
-}
-
 void addDirectionJacobian(
     const LineSegment& e,
     const UnitVec3& axis,
     const PointVariation& dx,
-    Matrix& J,
+    std::function<void(const Vec4&)> AddBlock,
     bool invert = false)
 {
     Vec3 y = axis - e.d * dot(e.d, axis);
     y /= e.l * (invert ? 1. : -1);
-    addBlock(~dx * y, J);
+    AddBlock(~dx * y);
 }
 
 Real calcPathError(const LineSegment& e, const Rotation& R, CoordinateAxis axis)
@@ -1242,15 +1159,16 @@ Real calcPathError(const LineSegment& e, const Rotation& R, CoordinateAxis axis)
     return dot(e.d, R.getAxisUnitVec(axis));
 }
 
-GeodesicJacobian addPathErrorJacobian(
+void addPathErrorJacobian(
     const LineSegment& e,
     const UnitVec3& axis,
     const Variation& dK,
-    Matrix& J,
+    std::function<void(const Vec4&)> AddBlock,
     bool invertV = false)
 {
-    addDirectionJacobian(e, axis, dK[1], J, invertV);
-    addBlock(~dK[0] * cross(axis, e.d), J);
+    addDirectionJacobian(e, axis, dK[1], AddBlock, invertV);
+    AddBlock(~dK[0] * cross(axis, e.d));
+    
 }
 
 } // namespace
@@ -1502,19 +1420,28 @@ void CableSpan::Impl::calcPathErrorJacobian(
         const CurveSegment* prev   = findPrevActiveCurveSegment(s, ix);
         const CurveSegment* next   = findNextActiveCurveSegment(s, ix);
 
+        int blkCol = col;
+        std::function<void(const Vec4&)> AddBlock = [&](const Vec4& block)
+        {
+            for (int ix = 0; ix < 4; ++ix) {
+                J[row][blkCol+ix] = block[ix];
+            }
+        };
+
         for (CoordinateAxis axis : axes) {
             const UnitVec3 a_P    = g.KP.R().getAxisUnitVec(axis);
             const Variation& dK_P = g.dKP;
 
-            addPathErrorJacobian(l_P, a_P, dK_P, J.block(row, col, 1, Nq));
+            addPathErrorJacobian(l_P, a_P, dK_P, AddBlock);
 
             if (prev) {
                 const Variation& prev_dK_Q = prev->getImpl().getPosInfo(s).dKQ;
+                blkCol = col - Nq;
                 addDirectionJacobian(
                     l_P,
                     a_P,
                     prev_dK_Q[1],
-                    J.block(row, col - Nq, 1, Nq),
+                    AddBlock,
                     true);
             }
             ++row;
@@ -1524,20 +1451,22 @@ void CableSpan::Impl::calcPathErrorJacobian(
             const UnitVec3 a_Q    = g.KQ.R().getAxisUnitVec(axis);
             const Variation& dK_Q = g.dKQ;
 
+            blkCol = col;
             addPathErrorJacobian(
                 l_Q,
                 a_Q,
                 dK_Q,
-                J.block(row, col, 1, Nq),
+                AddBlock,
                 true);
 
             if (next) {
                 const Variation& next_dK_P = next->getImpl().getPosInfo(s).dKP;
+                blkCol = col + Nq;
                 addDirectionJacobian(
                     l_Q,
                     a_Q,
                     next_dK_P[1],
-                    J.block(row, col + Nq, 1, Nq));
+                    AddBlock);
             }
             ++row;
         }
@@ -1582,7 +1511,7 @@ void CableSpan::Impl::calcLineSegments(
 
         const GeodesicInfo& g = segment.getImpl().getPosInfo(s);
         const Vec3 lineEnd    = g.KP.p();
-        lines.emplace_back(lineStart, lineEnd);
+        lines.push_back(LineSegment(lineStart, lineEnd));
 
         lineStart = g.KQ.p();
     }
@@ -1616,48 +1545,36 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         const size_t nActive = countActive(s);
 
         // Grab the shared data cache for computing the matrices, and lock it.
-        SolverDataCache& dataCache = findDataCache(nActive);
-        try {
-            dataCache.lock();
+        SolverData& data = m_Subsystem.getImpl().updCacheEntry(s).updOrInsert(nActive);
 
-            SolverData& data = dataCache.updData();
+        // Compute the straight-line segments.
+        calcLineSegments(s, x_O, x_I, data.lineSegments);
 
-            // Compute the straight-line segments.
-            calcLineSegments(s, x_O, x_I, data.lineSegments);
+        // Evaluate path error, and stop when converged.
+        calcPathErrorVector<2>(s, data.lineSegments, axes, data.pathError);
+        const Real maxPathError = data.pathError.normInf();
+        if (maxPathError < m_PathErrorBound) {
+            return;
+        }
 
-            // Evaluate path error, and stop when converged.
-            calcPathErrorVector<2>(s, data.lineSegments, axes, data.pathError);
-            const Real maxPathError = data.pathError.normInf();
-            if (maxPathError < m_PathErrorBound) {
-                return;
-            }
-
-            // Evaluate the path error jacobian.
-            calcPathErrorJacobian<2>(
+        // Evaluate the path error jacobian.
+        calcPathErrorJacobian<2>(
                 s,
                 data.lineSegments,
                 axes,
                 data.pathErrorJacobian);
 
-            // Compute path corrections.
-            const Correction* corrIt = calcPathCorrections(data);
+        // Compute path corrections.
+        const Correction* corrIt = calcPathCorrections(data);
 
-            // Apply path corrections.
-            for (const CurveSegment& obstacle : m_CurveSegments) {
-                if (!obstacle.getImpl().isActive(s)) {
-                    continue;
-                }
-                obstacle.getImpl().applyGeodesicCorrection(s, *corrIt);
-                ++corrIt;
+        // Apply path corrections.
+        for (const CurveSegment& obstacle : m_CurveSegments) {
+            if (!obstacle.getImpl().isActive(s)) {
+                continue;
             }
-
-        } catch (const std::exception& e) {
-            dataCache.unlock();
-            throw e;
+            obstacle.getImpl().applyGeodesicCorrection(s, *corrIt);
+            ++corrIt;
         }
-
-        // Release the lock on the shared data.
-        dataCache.unlock();
 
         // Path has changed: invalidate each segment's cache.
         for (const CurveSegment& obstacle : m_CurveSegments) {

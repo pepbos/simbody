@@ -105,7 +105,9 @@ public:
 
         bool analyticFormAvailable() const
         {
-            return m_Geometry.analyticFormAvailable();
+            // TODO
+            /* return m_Geometry.analyticFormAvailable(); */
+            return false;
         }
 
         const LocalGeodesicInfo& calcInitialGeodesic(
@@ -150,6 +152,7 @@ public:
 
         struct LocalGeodesicSample
         {
+            LocalGeodesicSample(Real l, FrenetFrame K) : length(l), frame(K) {}
             Real length;
             FrenetFrame frame;
         };
@@ -527,7 +530,51 @@ private:
 //==============================================================================
 class CableSubsystem::Impl : public Subsystem::Guts
 {
-public:
+    public:
+    struct SolverData
+    {
+        SolverData(int nActive) {
+            static constexpr int Q = 4;
+            static constexpr int C = 4;
+            const int n = nActive;
+
+            lineSegments.resize(n + 1);
+            pathErrorJacobian = Matrix(C * n, Q * n, 0.);
+            pathCorrection    = Vector(Q * n, 0.);
+            pathError         = Vector(C * n, 0.);
+            mat               = Matrix(Q * n, Q * n, NaN);
+            vec               = Vector(Q * n, NaN);
+        }
+
+        std::vector<CableSpan::LineSegment> lineSegments;
+
+        Matrix pathErrorJacobian;
+        Vector pathCorrection;
+        Vector pathError;
+        Matrix mat;
+        // TODO Cholesky decomposition...
+        FactorLU matInv;
+        Vector vec;
+    };
+
+    struct CacheEntry
+    {
+        CacheEntry() =default;
+        SolverData& updOrInsert(int nActive) {
+            if (nActive <= 0) {
+                throw std::runtime_error("Cannot produce solver data of zero dimension");
+            }
+
+            for (int i = m_Data.size(); i < nActive; ++i) {
+                m_Data.emplace_back(i + 1);
+            }
+
+            return m_Data.at(nActive - 1);
+        }
+
+        std::vector<SolverData> m_Data;
+    };
+
     Impl()
     {}
     ~Impl()
@@ -605,11 +652,34 @@ public:
         return 0;
     }
 
+    void realizeTopology(State& state)
+    {
+        CacheEntry cache{};
+        m_CacheIx = allocateDiscreteVariable(
+                state,
+                Stage::Velocity,
+                new Value<CacheEntry>(cache));
+    }
+
+    const CacheEntry& getCacheEntry(const State& state) const
+    {
+        return Value<CacheEntry>::downcast(
+                getDiscreteVarUpdateValue(state, m_CacheIx));
+    }
+
+    CacheEntry& updCacheEntry(const State& state) const
+    {
+        return Value<CacheEntry>::updDowncast(
+                updDiscreteVarUpdateValue(state, m_CacheIx));
+    }
+
     SimTK_DOWNCAST(Impl, Subsystem::Guts);
 
 private:
     // TOPOLOGY STATE
     Array_<CableSpan, CableSpanIndex> cables;
+
+    DiscreteVariableIndex m_CacheIx;
 };
 
 } // namespace SimTK
