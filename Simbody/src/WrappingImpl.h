@@ -110,10 +110,6 @@ public:
             return false;
         }
 
-        const LocalGeodesicInfo& calcInitialGeodesic(
-            const State& s,
-            const GeodesicInitialConditions& g0) const;
-
         // This will reevaluate the cached geodesic and status.
         // This will be called by the curve segment before updating the
         // position level cache variable of the CurveSegment.
@@ -311,8 +307,6 @@ public:
         return m_Geodesic.getStatus(s);
     }
 
-    void calcInitZeroLengthGeodesic(const State& state, Vec3 prev_QS) const;
-
     void applyGeodesicCorrection(
         const State& state,
         const ContactGeometry::GeodesicCorrection& c) const;
@@ -453,8 +447,6 @@ public:
 
     const PosInfo& getPosInfo(const State& state) const;
     const VelInfo& getVelInfo(const State& state) const;
-
-    void calcInitCablePath(State& s) const;
 
     void applyBodyForces(
         const State& state,

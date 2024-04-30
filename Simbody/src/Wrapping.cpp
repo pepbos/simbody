@@ -696,17 +696,6 @@ void LocalGeodesic::realizePosition(const State& s) const
 //------------------------------------------------------------------------------
 //                               PUBLIC METHODS
 //------------------------------------------------------------------------------
-const LocalGeodesicInfo& LocalGeodesic::calcInitialGeodesic(
-    State& s,
-    const GeodesicInitialConditions& g0) const
-{
-    // TODO is this correct?
-    CacheEntry& cache = updPrevCacheEntry(s);
-    shootNewGeodesic(g0, cache);
-    updCacheEntry(s) = cache;
-    getSubsystem().markDiscreteVarUpdateValueRealized(s, m_CacheIx);
-    return cache;
-}
 
 const LocalGeodesicInfo& LocalGeodesic::calcLocalGeodesicInfo(
     const State& s,
@@ -992,23 +981,6 @@ void CurveSegment::Impl::invalidatePositionLevelCache(const State& state) const
     m_Path.getImpl().invalidatePositionLevelCache(state);
 }
 
-void CurveSegment::Impl::calcInitZeroLengthGeodesic(State& s, Vec3 prev_QG)
-    const
-{
-    // Get tramsform from local surface frame to ground.
-    Transform X_GS = m_Mobod.getBodyTransform(s).compose(m_Offset);
-
-    Vec3 prev_QS = X_GS.shiftBaseStationToFrame(prev_QG);
-    Vec3 xGuess_S =
-        m_Geodesic.getInitialPointGuess(); // TODO move into function call?
-
-    GeodesicInitialConditions g0 =
-        GeodesicInitialConditions::CreateZeroLengthGuess(prev_QS, xGuess_S);
-    m_Geodesic.calcInitialGeodesic(s, g0);
-
-    invalidatePositionLevelCache(s);
-}
-
 void CurveSegment::Impl::applyGeodesicCorrection(
     const State& s,
     const CurveSegment::Impl::Correction& c) const
@@ -1051,22 +1023,7 @@ void xformSurfaceGeodesicToGround(
     geodesic_G.dKQ[0] = X_GS.R() * geodesic_S.dK_Q[0];
     geodesic_G.dKQ[1] = X_GS.R() * geodesic_S.dK_Q[1];
 
-    // TODO use SpatialVec for variation.
-    /* for (size_t i = 0; i < GeodesicDOF; ++i) { */
-    /*     geodesic_G.dKP[i][0] = X_GS.xformFrameVecToBase(geodesic_S.dKP[i][0])
-     */
-    /*     geodesic_G.dKP[i][1] = X_GS.xformFrameVecToBase(geodesic_S.dKP[i][1])
-     */
-
-    /*     geodesic_G.dKQ[i][0] = X_GS.xformFrameVecToBase(geodesic_S.dKQ[i][0])
-     */
-    /*     geodesic_G.dKQ[i][1] = X_GS.xformFrameVecToBase(geodesic_S.dKQ[i][1])
-     */
-    /* } */
-
     geodesic_G.length = geodesic_S.length;
-
-    throw std::runtime_error("NOTYETIMPLEMENTED: Check transformation order");
 }
 } // namespace
 
@@ -1199,10 +1156,10 @@ CurveSegmentIndex CableSpan::adoptSegment(const CurveSegment& segment)
 }
 
 void CableSpan::adoptWrappingObstacle(
-        const MobilizedBody& mobod,
-        Transform X_BS,
-        const ContactGeometry& geometry,
-        Vec3 contactPointHint)
+    const MobilizedBody& mobod,
+    Transform X_BS,
+    const ContactGeometry& geometry,
+    Vec3 contactPointHint)
 {
     CurveSegment(*this, mobod, X_BS, geometry, contactPointHint);
 }
@@ -1308,21 +1265,6 @@ CableSpan::Impl::VelInfo& CableSpan::Impl::updVelInfo(const State& s) const
 {
     return Value<VelInfo>::updDowncast(
         getSubsystem().updCacheEntry(s, m_VelInfoIx));
-}
-
-void CableSpan::Impl::calcInitCablePath(State& s) const
-{
-    Vec3 prev_QG =
-        m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
-    size_t i = 0;
-    for (const CurveSegment& obstacle : m_CurveSegments) {
-        if (obstacle.getImpl().getStatus(s) == Status::Disabled) {
-            continue;
-        }
-        obstacle.getImpl().calcInitZeroLengthGeodesic(s, prev_QG);
-
-        prev_QG = obstacle.getImpl().getPosInfo(s).KQ.p();
-    }
 }
 
 const CurveSegment* CableSpan::Impl::findPrevActiveCurveSegment(
