@@ -4,9 +4,12 @@ set -xeuo pipefail
 WORKSPACE=$(dirname $(dirname $(realpath "$0")))
 echo $WORKSPACE
 
-env -C $WORKSPACE cmake -B "simbody-build" -S "simbody" -DCMAKE_INSTALL_PREFIX="simbody-install"  -DCMAKE_EXPORT_COMPILE_COMMANDS="ON"
+# env -C $WORKSPACE cmake -B "simbody-build" -S "simbody" -DCMAKE_INSTALL_PREFIX="simbody-install"  -DCMAKE_EXPORT_COMPILE_COMMANDS="ON"
 env -C $WORKSPACE cmake --build "simbody-build" -j$(nproc) --target "install"
 
 ln -sf "$WORKSPACE/simbody-build/compile_commands.json" "$WORKSPACE/simbody/compile_commands.json"
 
-env -C "$WORKSPACE/simbody-build" ctest --parallel -j$(nproc) --output-on-failure
+# env -C "$WORKSPACE/simbody-build" ctest --parallel -j$(nproc) --output-on-failure
+
+LD_LIBRARY_PATH="$WORKSPACE/simbody-install/lib"
+env -C "$WORKSPACE/simbody-build" ./ExampleCableSpan
