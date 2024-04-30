@@ -87,8 +87,12 @@ class SimTK_SIMBODY_EXPORT CableSpan
 public:
     struct LineSegment
     {
-        UnitVec3 d{NaN, NaN, NaN};
+        LineSegment() = default;
+
+        LineSegment(Vec3 a, Vec3 b): l((b-a).norm()), d((b-a)/l) {}
+
         Real l = NaN;
+        UnitVec3 d{NaN, NaN, NaN};
     };
 
 public:
