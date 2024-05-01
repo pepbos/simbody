@@ -720,6 +720,9 @@ const LocalGeodesicInfo& LocalGeodesic::calcLocalGeodesicInfo(
 {
     realizePosition(s);
     CacheEntry& cache = updCacheEntry(s);
+    if (isNaN(cache.length)) {
+        throw std::runtime_error("Found cached length = NaN");
+    }
     calcCacheEntry(prev_QS, next_PS, cache);
     return cache;
 }
@@ -835,13 +838,20 @@ void LocalGeodesic::assertSurfaceBounds(
     const Vec3& prev_QS,
     const Vec3& next_PS) const
 {
+    /* std::cout << "LocalGeodesic::assertSurfaceBounds\n"; */
     // Make sure that the previous point does not lie inside the surface.
-    SimTK_ASSERT(
-        m_Geometry.calcSurfaceValue(prev_QS) < 0.,
-        "Unable to wrap over surface: Preceding point lies inside the surface");
-    SimTK_ASSERT(
-        m_Geometry.calcSurfaceValue(next_PS) < 0.,
-        "Unable to wrap over surface: Next point lies inside the surface");
+    if (calcSurfaceConstraintValue(m_Geometry, prev_QS) < 0.) {
+        std::cout << "prev_QS = " << prev_QS << "\n";
+        std::cout << "prev_PS = " << next_PS << "\n";
+        throw std::runtime_error("Unable to wrap over surface: Preceding point "
+                                 "lies inside the surface");
+    }
+    if (calcSurfaceConstraintValue(m_Geometry, next_PS) < 0.) {
+        std::cout << "prev_QS = " << prev_QS << "\n";
+        std::cout << "prev_PS = " << next_PS << "\n";
+        throw std::runtime_error(
+            "Unable to wrap over surface: Next point lies inside the surface");
+    }
 }
 
 void LocalGeodesic::calcCacheEntry(
