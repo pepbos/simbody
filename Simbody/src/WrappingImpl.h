@@ -355,8 +355,16 @@ public:
     // TODO allow for user to shoot his own geodesic.
     /* void calcGeodesic(State& state, Vec3 x, Vec3 t, Real l) const; */
 
-    CableSubsystem& updSubsystem() {return *m_Subsystem;}
-    const CableSubsystem& getSubsystem() const {return *m_Subsystem;}
+    CableSubsystem& updSubsystem()
+    {
+        return *m_Subsystem;
+    }
+    const CableSubsystem& getSubsystem() const
+    {
+        return *m_Subsystem;
+    }
+
+    const DecorativeGeometry& getDecoration() const {return m_Decoration;}
 
 private:
     PosInfo& updPosInfo(const State& state) const
@@ -376,6 +384,9 @@ private:
     Transform m_Offset;
 
     LocalGeodesic m_Geodesic;
+
+    // Decoration TODO should this be here?
+    DecorativeGeometry      m_Decoration;
 
     // TOPOLOGY CACHE
     CacheEntryIndex m_PosInfoIx;
@@ -452,6 +463,20 @@ public:
         const State& state,
         Real tension,
         Vector_<SpatialVec>& bodyForcesInG) const;
+
+    int calcDecorativeGeometryAndAppend(
+        const State& state,
+        Stage stage,
+        Array_<DecorativeGeometry>& decorations) const;
+
+    void calcPathPoints(const State& state, std::vector<Vec3>& points) const
+    {
+        points.push_back(getPosInfo(state).xO);
+        for (const CurveSegment& curve: m_CurveSegments) {
+            curve.getImpl().calcPathPoints(state, points);
+        }
+        points.push_back(getPosInfo(state).xI);
+    }
 
 private:
     PosInfo& updPosInfo(const State& s) const;
@@ -672,6 +697,23 @@ class CableSubsystem::Impl : public Subsystem::Guts
     CacheEntry& updCachedScratchboard(const State& state) const
     {
         return Value<CacheEntry>::updDowncast(updCacheEntry(state, m_CacheIx));
+    }
+
+    int calcDecorativeGeometryAndAppendImpl(
+        const State& state,
+        Stage stage,
+        Array_<DecorativeGeometry>& decorations) const override
+    {
+        if (stage != Stage::Position)
+            return 0;
+
+        for (const CableSpan& cable : cables) {
+            int returnValue = cable.getImpl().calcDecorativeGeometryAndAppend(state, stage, decorations);
+            if (returnValue != 0) {
+                return returnValue;
+            }
+        }
+        return 0;
     }
 
     SimTK_DOWNCAST(Impl, Subsystem::Guts);

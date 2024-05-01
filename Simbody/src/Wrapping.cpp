@@ -968,7 +968,9 @@ CurveSegment::Impl::Impl(
     m_Subsystem(&path.updImpl().updSubsystem()),
     m_Path(path), m_Index(-1), // TODO what to do with this index, and when
     m_Mobod(mobod), m_Offset(X_BS),
-    m_Geodesic(path.updImpl().updSubsystem(), geometry, initPointGuess)
+    m_Geodesic(path.updImpl().updSubsystem(), geometry, initPointGuess),
+    m_Decoration(geometry.createDecorativeGeometry()
+             .setColor(Orange).setOpacity(.75).setResolution(3))
 {}
 
 void CurveSegment::Impl::realizeTopology(State& s)
@@ -1620,6 +1622,65 @@ void CableSpan::Impl::applyBodyForces(
     for (const CurveSegment& segment : m_CurveSegments) {
         segment.getImpl().applyBodyForce(s, tension, bodyForcesInG);
     }
+}
+
+int CableSpan::Impl::calcDecorativeGeometryAndAppend(
+    const State& s,
+    Stage stage,
+    Array_<DecorativeGeometry>& decorations) const
+{
+    const Vec3 color = Green; // Red Purple
+
+    const PosInfo& ppe = getPosInfo(s);
+
+    // Draw point at origin and termination.
+    decorations.push_back(DecorativePoint(ppe.xO).setColor(Green));
+    decorations.push_back(DecorativePoint(ppe.xI).setColor(Red));
+
+    /* decorations.push_back(DecorativeLine(ppe.xO, ppe.xI) */
+    /*         .setColor(Purple) */
+    /*         .setLineThickness(3)); */
+
+    Vec3 lastCurvePoint = ppe.xO;
+    for (const CurveSegment& curveSegment : m_CurveSegments) {
+        const CurveSegment::Impl& curve = curveSegment.getImpl();
+
+        const Transform X_GS   = curve.calcSurfaceFrameInGround(s);
+        DecorativeGeometry geo = curve.getDecoration();
+        const Transform& X_SD  = geo.getTransform(); // TODO getTransform?
+
+        // Inactive surfaces are dimmed.
+        if (!curve.isActive(s)) {
+            decorations.push_back(geo.setTransform(X_GS * X_SD)
+                                      .setColor(Real(0.75) * geo.getColor()));
+            continue;
+        }
+
+        decorations.push_back(geo.setTransform(X_GS * X_SD));
+
+        Vec3 prevPoint = findPrevPoint(s, curve.getIndex());
+        Vec3 x_P       = curve.getPosInfo(s).KP.p();
+
+        /* decorations.push_back(DecorativeLine(prevPoint, x_P) */
+        /*                           .setColor(Purple) */
+        /*                           .setLineThickness(3)); */
+
+        lastCurvePoint = curve.getPosInfo(s).KQ.p();
+
+        Transform K_P = curve.getPosInfo(s).KP;
+        Transform K_Q = curve.getPosInfo(s).KQ;
+        decorations.push_back(DecorativeLine(K_P.p(), K_P.p() + K_P.R().getAxisUnitVec(TangentAxis))
+                                  .setColor(Orange)
+                                  .setLineThickness(3));
+        decorations.push_back(DecorativeLine(K_Q.p(), K_Q.p() + K_Q.R().getAxisUnitVec(TangentAxis))
+                                  .setColor(Blue)
+                                  .setLineThickness(3));
+    }
+
+    /* decorations.push_back(DecorativeLine(lastCurvePoint, ppe.xI) */
+    /*         .setColor(Purple) */
+    /*         .setLineThickness(3)); */
+    return 0;
 }
 
 //==============================================================================
