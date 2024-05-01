@@ -593,10 +593,10 @@ const Correction* calcPathCorrections(SolverData& data)
 
     data.mat = data.pathErrorJacobian.transpose() * data.pathErrorJacobian;
     for (int i = 0; i < data.mat.nrow(); ++i) {
-        data.mat[i][i] += w;
+        data.mat[i][i] += w + 1.;
     }
     data.matInv = data.mat;
-    data.vec    = data.pathErrorJacobian.transpose() * data.pathError;
+    data.vec    = data.pathErrorJacobian.transpose() * (data.pathError * (-1.));
     data.matInv.solve(data.vec, data.pathCorrection);
 
     static_assert(
