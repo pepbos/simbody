@@ -862,6 +862,7 @@ void LocalGeodesic::shootNewGeodesic(
         m_ProjectionMaxIter,
         m_ProjectionAccuracy,
         cache.samples);
+    cache.length = g0.l;
 
     /* using Y  = ImplicitGeodesicState; */
     /* if (analyticFormAvailable()) { */
