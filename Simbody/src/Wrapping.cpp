@@ -567,6 +567,7 @@ void calcGeodesicAndVariationImplicitly(
     };
 
     Y y0(x, t);
+    g(y0);
 
     RKM rkm{};
 
