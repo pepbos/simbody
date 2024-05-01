@@ -40,6 +40,30 @@ static const int GeodesicDOF = 4;
 namespace
 {
 
+// TODO Sign of implicit function was flipped.
+Real calcSurfaceConstraintValue(
+    const ContactGeometry& geometry,
+    Vec3 point)
+{
+    return -geometry.calcSurfaceValue(point);
+}
+
+// TODO Sign of implicit function was flipped.
+Vec3 calcSurfaceConstraintGradient(
+    const ContactGeometry& geometry,
+    Vec3 point)
+{
+    return -geometry.calcSurfaceGradient(point);
+}
+
+// TODO Sign of implicit function was flipped.
+Mat33 calcSurfaceConstraintHessian(
+    const ContactGeometry& geometry,
+    Vec3 point)
+{
+    return -geometry.calcSurfaceHessian(point);
+}
+
 struct ImplicitGeodesicState
 {
     ImplicitGeodesicState() = default;
@@ -94,13 +118,13 @@ void calcSurfaceProjectionFast(
 {
     size_t it = 0;
     for (; it < maxIter; ++it) {
-        const Real c = geometry.calcSurfaceValue(x);
+        const Real c = calcSurfaceConstraintValue(geometry, x);
 
         if (std::abs(c) < eps) {
             break;
         }
 
-        const Vec3 g = geometry.calcSurfaceGradient(x);
+        const Vec3 g = calcSurfaceConstraintGradient(geometry, x);
         x += -g * c / dot(g, g);
     }
 
@@ -108,7 +132,7 @@ void calcSurfaceProjectionFast(
         it < maxIter,
         "Surface projection failed: Reached max iterations");
 
-    UnitVec3 n(geometry.calcSurfaceGradient(x));
+    UnitVec3 n(calcSurfaceConstraintGradient(geometry, x));
     t         = t - dot(n, t) * n;
     Real norm = t.norm();
     SimTK_ASSERT(!isNaN(norm), "Surface projection failed: Detected NaN");
@@ -149,15 +173,15 @@ bool calcNearestPointOnLineImplicitly(
         const Vec3 pl = a + (b - a) * alpha;
 
         // Constraint evaluation at touchdown point.
-        const double c = geometry.calcSurfaceValue(pl);
+        const double c = calcSurfaceConstraintValue(geometry,pl);
 
         // Break on touchdown, TODO or not?
         if (std::abs(c) < eps)
             break;
 
         // Gradient at point on line.
-        const Vec3 g  = geometry.calcSurfaceGradient(pl);
-        const Mat33 H = geometry.calcSurfaceHessian(pl);
+        const Vec3 g  = calcSurfaceConstraintGradient(geometry, pl);
+        const Mat33 H = calcSurfaceConstraintHessian(geometry, pl);
 
         // Add a weight to the newton step to avoid large steps.
         constexpr double w = 0.5;
@@ -183,7 +207,7 @@ bool calcNearestPointOnLineImplicitly(
     point = a + (b - a) * alpha;
 
     // Assumes a negative constraint evaluation means touchdown.
-    const bool contact = geometry.calcSurfaceValue(point) < eps;
+    const bool contact = calcSurfaceConstraintValue(geometry,point) < eps;
 
     // TODO handle here?
     if (iter >= maxIter) {
@@ -221,8 +245,9 @@ ImplicitGeodesicState operator+(
 Real calcInfNorm(const ImplicitGeodesicState& q)
 {
     Real infNorm = 0.;
-    for (size_t r = 0; r < q.asVec().nrow(); ++r) {
-        infNorm = std::max(infNorm, q.asVec()[r]);
+    const Vec<10, Real>& v = q.asVec();
+    for (size_t r = 0; r < v.nrow(); ++r) {
+        infNorm = std::max(infNorm, std::abs(v[r]));
     }
     return infNorm;
 }
@@ -247,7 +272,7 @@ public:
     Y stepTo(
         Y y0,
         Real x1,
-        Real h0,
+        Real& h0,
         std::function<DY(const Y&)>& f,         // Dynamics
         std::function<void(Y&)>& g,             // Surface projection
         std::function<void(Real, const Y&)>& m, // State log
@@ -256,11 +281,6 @@ public:
     size_t getNumberOfFailedSteps() const
     {
         return _failedCount;
-    }
-
-    size_t getInitStepSize() const
-    {
-        return _h0;
     }
 
 private:
@@ -327,7 +347,7 @@ Real RKM::step(Real h, std::function<DY(const Y&)>& f)
 RKM::Y RKM::stepTo(
     Y y0,
     Real x1,
-    Real h0,
+    Real& h0,
     std::function<DY(const Y&)>& f,
     std::function<void(Y&)>& g,
     std::function<void(Real, const Y&)>& m,
@@ -337,7 +357,7 @@ RKM::Y RKM::stepTo(
     m(0., y0);
 
     _y.at(0)     = std::move(y0);
-    _h           = h0;
+    _h           = std::min(h0 > _hMin ? h0 : _hMin, _hMax);
     _e           = 0.;
     _failedCount = 0;
 
@@ -372,16 +392,17 @@ RKM::Y RKM::stepTo(
 
         _e = std::max(_e, err);
 
-        if(_h < _hMin) {
-            throw std::runtime_error("Geodesic Integrator failed: Reached very small stepsize");
-        }
-        if(_h > _hMax) {
-            throw std::runtime_error("Geodesic Integrator failed: Reached very large stepsize");
+        if (_h < _hMin) {
+            throw std::runtime_error(
+                "Geodesic Integrator failed: Reached very small stepsize");
         }
 
         if (init) {
-            _h0 = _h;
+            h0 = _h;
         }
+    }
+    if (std::abs(x - x1) > 1e-13) {
+        throw std::runtime_error("failed to integrate");
     }
     return _y.at(0);
 }
@@ -393,8 +414,8 @@ Real calcNormalCurvature(
 {
     const Vec3& p  = point;
     const Vec3& v  = tangent;
-    const Vec3 g   = geometry.calcSurfaceGradient(p);
-    const Vec3 h_v = geometry.calcSurfaceHessian(p) * v;
+    const Vec3 g   = calcSurfaceConstraintGradient(geometry,p);
+    const Vec3 h_v = calcSurfaceConstraintHessian(geometry,p) * v;
     // Sign flipped compared to thesis: kn = negative, see eq 3.63
     return -dot(v, h_v) / g.norm();
 }
@@ -407,8 +428,8 @@ Real calcGeodesicTorsion(
     // TODO verify this!
     const Vec3& p  = point;
     const Vec3& v  = tangent;
-    const Vec3 g   = geometry.calcSurfaceGradient(p);
-    const Vec3 h_v = geometry.calcSurfaceHessian(p) * v;
+    const Vec3 g   = calcSurfaceConstraintGradient(geometry,p);
+    const Vec3 h_v = calcSurfaceConstraintHessian(geometry,p) * v;
     const Vec3 gxv = cross(g, v);
     return -dot(h_v, gxv) / dot(g, g);
 }
@@ -416,7 +437,7 @@ Real calcGeodesicTorsion(
 UnitVec3 calcSurfaceNormal(const ContactGeometry& geometry, Vec3 point)
 {
     const Vec3& p       = point;
-    const Vec3 gradient = geometry.calcSurfaceGradient(p);
+    const Vec3 gradient = calcSurfaceConstraintGradient(geometry, p);
     return UnitVec3{gradient};
 }
 
@@ -462,9 +483,9 @@ Mat33 calcAdjoint(const Mat33& mat)
 Real calcGaussianCurvature(const ContactGeometry& geometry, Vec3 point)
 {
     const Vec3& p = point;
-    Vec3 g        = geometry.calcSurfaceGradient(p);
+    Vec3 g        = calcSurfaceConstraintGradient(geometry, p);
     Real gDotg    = dot(g, g);
-    Mat33 adj     = calcAdjoint(geometry.calcSurfaceHessian(p));
+    Mat33 adj     = calcAdjoint(calcSurfaceConstraintHessian(geometry, p));
 
     if (gDotg * gDotg < 1e-13) {
         throw std::runtime_error(
@@ -558,8 +579,6 @@ void calcGeodesicAndVariationImplicitly(
     SimTK_ASSERT(log.size() > 0, "Failed to integrate geodesic: Log is empty");
     calcGeodesicBoundaryState(geometry, y0, false, K_P, dK_P[1], dK_P[0]);
     calcGeodesicBoundaryState(geometry, y1, true, K_Q, dK_Q[1], dK_Q[0]);
-
-    ds = rkm.getInitStepSize();
 }
 
 } // namespace
