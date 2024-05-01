@@ -664,24 +664,6 @@ class CableSubsystem::Impl : public Subsystem::Guts
         return 0;
     }
 
-    int realizeSubsystemPositionImpl(const State& state) const override
-    {
-        for (CableSpanIndex ix(0); ix < cables.size(); ++ix) {
-            const CableSpan& path = getCablePath(ix);
-            path.getImpl().realizePosition(state);
-        }
-        return 0;
-    }
-
-    int realizeSubsystemVelocityImpl(const State& state) const override
-    {
-        for (CableSpanIndex ix(0); ix < cables.size(); ++ix) {
-            const CableSpan& path = getCablePath(ix);
-            path.getImpl().realizeVelocity(state);
-        }
-        return 0;
-    }
-
     void realizeTopology(State& state)
     {
         CacheEntry cache{};
