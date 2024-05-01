@@ -950,7 +950,7 @@ const CableSpan& CurveSegment::getCable() const
     return getImpl().getCable();
 }
 
-Real CurveSegment::getSegmentLength(const State& s)
+Real CurveSegment::getSegmentLength(const State& s) const
 {
     getImpl().realizeCablePosition(s);
     return getImpl().getPosInfo(s).length;
@@ -1007,25 +1007,30 @@ void CurveSegment::Impl::realizeCablePosition(const State& s) const
 void CurveSegment::Impl::invalidatePositionLevelCache(const State& state) const
 {
     getSubsystem().markCacheValueNotRealized(state, m_PosInfoIx);
-    m_Path.getImpl().invalidatePositionLevelCache(state);
+    /* m_Path.getImpl().invalidatePositionLevelCache(state); */
 }
 
 void CurveSegment::Impl::applyGeodesicCorrection(
     const State& s,
     const CurveSegment::Impl::Correction& c) const
 {
+    /* std::cout << "apply correction = " << c << "\n"; */
     // Apply correction to curve.
     m_Geodesic.applyGeodesicCorrection(s, c);
 
     // Invalidate position level cache.
-    invalidatePositionLevelCache(s);
+    /* invalidatePositionLevelCache(s); */
 }
 
 void CurveSegment::Impl::calcPathPoints(
     const State& s,
     std::vector<Vec3>& points) const
 {
-    const Transform& X_GS = getPosInfo(s).X_GS;
+    if (!isActive(s)) {
+        return;
+    }
+    const PosInfo& ppe    = getPosInfo(s);
+    const Transform& X_GS = ppe.X_GS;
     size_t initSize       = points.size();
     m_Geodesic.calcPathPoints(s, points);
     for (size_t i = points.size() - initSize; i < points.size(); ++i) {
