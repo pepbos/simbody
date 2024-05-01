@@ -122,18 +122,20 @@ void calcSurfaceProjectionFast(
         x += -g * c / dot(g, g);
     }
 
-    SimTK_ASSERT(
-        it < maxIter,
+    if(it >= maxIter) {throw std::runtime_error(
         "Surface projection failed: Reached max iterations");
+    }
+
+    if(std::abs(geometry.calcSurfaceValue(x)) > eps) {throw std::runtime_error(
+        "Surface projection failed: no longer on surface");
+    }
 
     UnitVec3 n(calcSurfaceConstraintGradient(geometry, x));
     t         = t - dot(n, t) * n;
     Real norm = t.norm();
-    SimTK_ASSERT(!isNaN(norm), "Surface projection failed: Detected NaN");
-    SimTK_ASSERT(
-        norm > 1e-13,
-        "Surface projection failed: Tangent guess is parallel to surface "
-        "normal");
+    if(isNaN(norm)) throw std::runtime_error("Surface projection failed: Detected NaN");
+    if(norm < 1e-13) throw std::runtime_error( "Surface projection failed: Tangent guess is parallel to surface normal");
+
     t = t / norm;
 }
 
