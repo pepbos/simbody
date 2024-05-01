@@ -1209,25 +1209,33 @@ void CableSpan::Impl::realizeTopology(State& s)
         Stage::Infinity,
         new Value<PosInfo>(posInfo));
 
+    getSubsystem().markCacheValueNotRealized(s, m_PosInfoIx);
+
     VelInfo velInfo{};
     m_VelInfoIx = updSubsystem().allocateCacheEntry(
         s,
         Stage::Velocity,
         Stage::Infinity,
         new Value<VelInfo>(velInfo));
+
+    getSubsystem().markCacheValueNotRealized(s, m_VelInfoIx);
 }
 
 void CableSpan::Impl::realizePosition(const State& s) const
 {
+    std::cout << "Cablespan: realizePosition\n";
     if (getSubsystem().isCacheValueRealized(s, m_PosInfoIx)) {
         return;
     }
     calcPosInfo(s, updPosInfo(s));
     getSubsystem().markCacheValueRealized(s, m_PosInfoIx);
+    std::cout << "done Path calcPosInfo\n";
+    std::cout << "    l = " << getPosInfo(s).l << "\n";
 }
 
 void CableSpan::Impl::realizeVelocity(const State& s) const
 {
+    realizePosition(s);
     if (getSubsystem().isCacheValueRealized(s, m_VelInfoIx)) {
         return;
     }
@@ -1238,6 +1246,7 @@ void CableSpan::Impl::realizeVelocity(const State& s) const
 void CableSpan::Impl::invalidatePositionLevelCache(const State& s) const
 {
     getSubsystem().markCacheValueNotRealized(s, m_PosInfoIx);
+    getSubsystem().markCacheValueNotRealized(s, m_VelInfoIx);
 }
 
 const CableSpan::Impl::PosInfo& CableSpan::Impl::getPosInfo(
@@ -1258,8 +1267,7 @@ const CableSpan::Impl::VelInfo& CableSpan::Impl::getVelInfo(
     const State& s) const
 {
     realizeVelocity(s);
-    return Value<VelInfo>::downcast(
-        getSubsystem().getCacheEntry(s, m_VelInfoIx));
+    return Value<VelInfo>::downcast(getSubsystem().getCacheEntry(s, m_VelInfoIx));
 }
 
 CableSpan::Impl::VelInfo& CableSpan::Impl::updVelInfo(const State& s) const
@@ -1543,7 +1551,7 @@ void CableSpan::Impl::calcVelInfo(const State& s, VelInfo& velInfo) const
 {
     const PosInfo& pos = getPosInfo(s);
 
-    Real lengthDot = 0.;
+    Real& lengthDot = (velInfo.lengthDot = 0.);
 
     Vec3 v_GQ = m_OriginBody.findStationVelocityInGround(s, m_OriginPoint);
     const CurveSegment* lastActive = nullptr;
