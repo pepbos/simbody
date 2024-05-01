@@ -54,9 +54,38 @@ public:
     // TODO remove? keep? make private?
     const CableSpan& getCable() const;
 
-    Real getSegmentLength(const State& s);
+    Real getSegmentLength(const State& s) const;
+    const Transform& getFrenetFrameStart(const State& s) const {
+        throw std::runtime_error("NOTYETIMPLEMENTED");
+    }
+    const Transform& getFrenetFrameEnd(const State& s) const {
+        throw std::runtime_error("NOTYETIMPLEMENTED");
+    }
 
     Status getStatus(const State& state) const;
+
+    const ContactGeometry& getContactGeometry() const;
+    const Transform& getSurfaceToGroundTransform(const State& s) const;
+
+    Real calcNormalCurvature(Vec3 point, Vec3 tangent) const {
+        throw std::runtime_error("NOTYETIMPLEMENTED");
+        return NaN;
+    }
+
+    Real calcGeodesicTorsion(Vec3 point, Vec3 tangent) const {
+        throw std::runtime_error("NOTYETIMPLEMENTED");
+        return NaN;
+    }
+
+    UnitVec3 calcSurfaceNormal(Vec3 point) const {
+        throw std::runtime_error("NOTYETIMPLEMENTED");
+        return {NaN, NaN, NaN};
+    }
+
+    Real calcSurfaceValue(Vec3 point) const {
+        throw std::runtime_error("NOTYETIMPLEMENTED");
+        return NaN;
+    }
 
     // TODO seems useful:
     /* void setDisabled(const State& state) const; */

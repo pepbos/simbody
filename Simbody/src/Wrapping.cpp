@@ -41,25 +41,19 @@ namespace
 {
 
 // TODO Sign of implicit function was flipped.
-Real calcSurfaceConstraintValue(
-    const ContactGeometry& geometry,
-    Vec3 point)
+Real calcSurfaceConstraintValue(const ContactGeometry& geometry, Vec3 point)
 {
     return -geometry.calcSurfaceValue(point);
 }
 
 // TODO Sign of implicit function was flipped.
-Vec3 calcSurfaceConstraintGradient(
-    const ContactGeometry& geometry,
-    Vec3 point)
+Vec3 calcSurfaceConstraintGradient(const ContactGeometry& geometry, Vec3 point)
 {
     return -geometry.calcSurfaceGradient(point);
 }
 
 // TODO Sign of implicit function was flipped.
-Mat33 calcSurfaceConstraintHessian(
-    const ContactGeometry& geometry,
-    Vec3 point)
+Mat33 calcSurfaceConstraintHessian(const ContactGeometry& geometry, Vec3 point)
 {
     return -geometry.calcSurfaceHessian(point);
 }
@@ -173,7 +167,7 @@ bool calcNearestPointOnLineImplicitly(
         const Vec3 pl = a + (b - a) * alpha;
 
         // Constraint evaluation at touchdown point.
-        const double c = calcSurfaceConstraintValue(geometry,pl);
+        const double c = calcSurfaceConstraintValue(geometry, pl);
 
         // Break on touchdown, TODO or not?
         if (std::abs(c) < eps)
@@ -207,7 +201,7 @@ bool calcNearestPointOnLineImplicitly(
     point = a + (b - a) * alpha;
 
     // Assumes a negative constraint evaluation means touchdown.
-    const bool contact = calcSurfaceConstraintValue(geometry,point) < eps;
+    const bool contact = calcSurfaceConstraintValue(geometry, point) < eps;
 
     // TODO handle here?
     if (iter >= maxIter) {
@@ -244,7 +238,7 @@ ImplicitGeodesicState operator+(
 
 Real calcInfNorm(const ImplicitGeodesicState& q)
 {
-    Real infNorm = 0.;
+    Real infNorm           = 0.;
     const Vec<10, Real>& v = q.asVec();
     for (size_t r = 0; r < v.nrow(); ++r) {
         infNorm = std::max(infNorm, std::abs(v[r]));
@@ -414,8 +408,8 @@ Real calcNormalCurvature(
 {
     const Vec3& p  = point;
     const Vec3& v  = tangent;
-    const Vec3 g   = calcSurfaceConstraintGradient(geometry,p);
-    const Vec3 h_v = calcSurfaceConstraintHessian(geometry,p) * v;
+    const Vec3 g   = calcSurfaceConstraintGradient(geometry, p);
+    const Vec3 h_v = calcSurfaceConstraintHessian(geometry, p) * v;
     // Sign flipped compared to thesis: kn = negative, see eq 3.63
     return -dot(v, h_v) / g.norm();
 }
@@ -428,8 +422,8 @@ Real calcGeodesicTorsion(
     // TODO verify this!
     const Vec3& p  = point;
     const Vec3& v  = tangent;
-    const Vec3 g   = calcSurfaceConstraintGradient(geometry,p);
-    const Vec3 h_v = calcSurfaceConstraintHessian(geometry,p) * v;
+    const Vec3 g   = calcSurfaceConstraintGradient(geometry, p);
+    const Vec3 h_v = calcSurfaceConstraintHessian(geometry, p) * v;
     const Vec3 gxv = cross(g, v);
     return -dot(h_v, gxv) / dot(g, g);
 }
