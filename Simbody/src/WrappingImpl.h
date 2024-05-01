@@ -544,10 +544,8 @@ private:
 
     Array_<CurveSegment, CurveSegmentIndex> m_CurveSegments{};
 
-    Real m_PathErrorBound = 0.1;
-    Real m_ObsErrorBound  = 0.1;
-    size_t m_PathMaxIter  = 10;
-    size_t m_ObsMaxIter   = 10;
+    Real m_PathErrorBound = 1e-4;
+    size_t m_PathMaxIter  = 50;
 
     // TOPOLOGY CACHE (set during realizeTopology())
     CacheEntryIndex m_PosInfoIx;

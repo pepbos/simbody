@@ -1098,10 +1098,12 @@ SpatialVec CurveSegment::Impl::calcAppliedWrenchInGround(
     const UnitVec3& t_Q = posInfo.KQ.R().getAxisUnitVec(TangentAxis);
     const Vec3 F_G      = tension * (t_Q - t_P);
 
-    const Vec3 x_GS = posInfo.X_GS.p();
-    const Vec3& r_P = posInfo.KP.p() - x_GS;
-    const Vec3& r_Q = posInfo.KQ.p() - x_GS;
+    const Transform& X_GB = m_Mobod.getBodyTransform(s);
+    const Vec3 x_GB = X_GB.p();
+    const Vec3 r_P = posInfo.KP.p() - x_GB;
+    const Vec3 r_Q = posInfo.KQ.p() - x_GB;
     const Vec3 M_G  = tension * (r_Q % t_Q - r_P % t_P);
+
     return {M_G, F_G};
 }
 
