@@ -760,7 +760,7 @@ void LocalGeodesic::calcLiftoffIfNeeded(
 
     // For a zero-length curve, trigger liftoff when the prev and next points
     // lie above the surface plane.
-    if (dot(prev_QS - g.K_P.p(), g.K_P.R().getAxisUnitVec(NormalAxis)) <= 0. &&
+    if (dot(prev_QS - g.K_P.p(), g.K_P.R().getAxisUnitVec(NormalAxis)) <= 0. ||
         dot(next_PS - g.K_P.p(), g.K_P.R().getAxisUnitVec(NormalAxis)) <= 0.) {
         // No liftoff.
         return;
