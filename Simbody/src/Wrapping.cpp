@@ -372,12 +372,12 @@ RKM::Y RKM::stepTo(
 
         _e = std::max(_e, err);
 
-        SimTK_ASSERT(
-            _h > _hMin,
-            "Geodesic Integrator failed: Reached very small stepsize");
-        SimTK_ASSERT(
-            _h < _hMax,
-            "Geodesic Integrator failed: Reached very large stepsize");
+        if(_h < _hMin) {
+            throw std::runtime_error("Geodesic Integrator failed: Reached very small stepsize");
+        }
+        if(_h > _hMax) {
+            throw std::runtime_error("Geodesic Integrator failed: Reached very large stepsize");
+        }
 
         if (init) {
             _h0 = _h;
