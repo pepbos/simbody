@@ -353,11 +353,11 @@ int main()
             Transform(Vec3{-arm2}));
 
         // obs4
-        /* path1.adoptWrappingObstacle( */
-        /*     ball2, */
-        /*     Transform(), */
-        /*     ContactGeometry::Sphere(Rad2), */
-        /*     {0., 1., 0.}); */
+        path1.adoptWrappingObstacle(
+            ball2,
+            Transform(),
+            ContactGeometry::Sphere(Rad2),
+            {0., 1., 0.});
 
         MyCableSpring cable1(forces, path1, 100., 3.5, 0.1);
 
@@ -374,7 +374,7 @@ int main()
         Random::Gaussian random;
         while (true) {
             system.realize(s, Stage::Position);
-            /* viz.report(s); */
+            viz.report(s);
             const Real l = path1.getLength(s);
             cout << "path1 init length=" << l << endl;
 
@@ -389,8 +389,6 @@ int main()
             std::ostringstream oss;
             testJacobian(f, qDim, 1e-4, 1e-3, oss);
             std::cout << oss.str() << "\n";
-
-            return 0;
 
             {
                 /* Random::Gaussian random; */
