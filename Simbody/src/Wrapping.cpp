@@ -1215,7 +1215,8 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         // Evaluate path error, and stop when converged.
         calcPathErrorVector<2>(s, data.lineSegments, axes, data.pathError);
         const Real maxPathError = data.pathError.normInf();
-        if (maxPathError < m_PathErrorBound) {
+        std::cout << " max = " << maxPathError << "\n";
+        if (maxPathError < m_PathErrorBound || (posInfo.loopIter + 1) >= m_PathMaxIter) {
             posInfo.l = 0.;
             for (const LineSegment& line : data.lineSegments) {
                 posInfo.l += line.l;
