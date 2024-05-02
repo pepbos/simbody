@@ -7,6 +7,56 @@ using std::endl;
 
 using namespace SimTK;
 
+int testJacobian(
+    std::function<void(const Vector&, Vector&, Matrix&)> f,
+    int qDim,
+    Real delta,
+    Real eps,
+    std::ostream& os)
+{
+    int returnValue = 0;
+    for (size_t i = 0; i < qDim; ++i) {
+        for (Real d : std::array<Real, 2>{delta, -delta}) {
+            const Vector q0(qDim, 0.);
+            Vector y0;
+            Matrix J0;
+            f(q0, y0, J0);
+
+            if (J0.nrow() != y0.nrow()) {
+                throw std::runtime_error("incompatible row dimensions");
+            }
+
+            Vector q1(qDim, 0.);
+            q1[i] = d;
+
+            Vector y1;
+            Matrix J1;
+            f(q1, y1, J1);
+
+            const Vector dy         = (y1 - y0) / d;
+            const Vector dyExpected = (J0 * q1) / d;
+
+            const Vector e  = dy - dyExpected;
+            const Real diff = e.norm();
+            if (e.norm() > eps) {
+                os << "FAILED Perturbation test " << i << "\n";
+                returnValue = 1;
+            } else {
+                os << "PASSED Perturbation test " << i << "\n";
+            }
+            os << "    d     = " << d << "\n";
+            os << "    q1    = " << q1 << "\n";
+            os << "    J     = " << J0 << "\n";
+            os << "    y0    = " << y0 << "\n";
+            os << "    y1    = " << y1 << "\n";
+            os << "    dy    = " << dy << "\n";
+            os << "    dyExp = " << dyExpected << "\n";
+            os << "    e     = " << e << ".norm() = " << e.norm() << "\n";
+        }
+    }
+    return returnValue;
+}
+
 // This force element implements an elastic cable of a given nominal length,
 // and a stiffness k that generates a k*x force opposing stretch beyond
 // the slack length. There is also a dissipation term (k*x)*c*xdot. We keep
@@ -269,10 +319,10 @@ int main()
             Vec3(10., 0.0, 0.1));
 
         Body::Rigid ballBody(MassProperties(1.0, Vec3(0), Inertia(1)));
-        const Real Rad = 1.1;
+        const Real Rad = 2.0;
 
         Vec3 offset = {0., 0., 0.};
-        Vec3 arm = {0.25, 0., 0.};
+        Vec3 arm    = {0.25, 0., 0.};
 
         /* UnitVec3 axis0(Vec3{1., 1., 1.}); */
         /* Real angle0 = 0.5; */
@@ -293,21 +343,21 @@ int main()
 
         Body::Rigid ball2Body(MassProperties(1.0, Vec3(0), Inertia(1)));
         const Real Rad2 = 1.1;
-        Vec3 offset2 = {4., 0., 0.};
-        Vec3 arm2 = {0.25, 0., 0.};
+        Vec3 offset2    = {5., 0., 0.};
+        Vec3 arm2       = {0.25, 0., 0.};
 
         MobilizedBody::Ball ball2(
             Ground,
             Transform(Vec3{offset2 + arm2}),
             ball2Body,
-            Transform(Vec3{- arm2}));
+            Transform(Vec3{-arm2}));
 
         // obs4
-        path1.adoptWrappingObstacle(
-            ball2,
-            Transform(),
-            ContactGeometry::Sphere(Rad2),
-            {0., 1., 0.});
+        /* path1.adoptWrappingObstacle( */
+        /*     ball2, */
+        /*     Transform(), */
+        /*     ContactGeometry::Sphere(Rad2), */
+        /*     {0., 1., 0.}); */
 
         MyCableSpring cable1(forces, path1, 100., 3.5, 0.1);
 
@@ -319,32 +369,47 @@ int main()
         system.realizeTopology();
         State s = system.getDefaultState();
 
-        Real v = 0.;
+        Real v          = 0.;
         bool continuous = false;
-            Random::Gaussian random;
-        while(true) {
+        Random::Gaussian random;
+        while (true) {
             system.realize(s, Stage::Position);
-            viz.report(s);
+            /* viz.report(s); */
             const Real l = path1.getLength(s);
             cout << "path1 init length=" << l << endl;
 
+            std::array<CoordinateAxis, 2> axes = {NormalAxis, BinormalAxis};
+            std::function<void(const Vector&, Vector&, Matrix&)> f =
+                [&](const Vector& q, Vector& y, Matrix& J) {
+                    path1.applyCorrection(s, q);
+                    path1.calcPathErrorJacobian(s, y, J);
+                };
+            int qDim = path1.countActive(s) * 4;
+
+            std::ostringstream oss;
+            testJacobian(f, qDim, 1e-4, 1e-3, oss);
+            std::cout << oss.str() << "\n";
+
+            return 0;
+
             {
-            /* Random::Gaussian random; */
-            v += random.getValue() * 1e-2;
-            v = std::max(-1e-1, v);
-            v = std::min(1e-1, v);
+                /* Random::Gaussian random; */
+                v += random.getValue() * 1e-2;
+                v = std::max(-1e-1, v);
+                v = std::min(1e-1, v);
             }
 
             for (int i = 0; i < s.getNQ(); ++i) {
-            /* Random::Gaussian random; */
+                /* Random::Gaussian random; */
                 s.updQ()[i] += random.getValue() * 1e-1 + v;
             }
             for (int i = 0; i < s.getNU(); ++i) {
-            /* Random::Gaussian random; */
+                /* Random::Gaussian random; */
                 s.updU()[i] += random.getValue() * 1e-3;
             }
+
             if (continuous) {
-            sleepInSec(0.1);
+                sleepInSec(0.1);
             } else {
                 cout << "Hit ENTER ..., or q\n";
                 const char ch = getchar();

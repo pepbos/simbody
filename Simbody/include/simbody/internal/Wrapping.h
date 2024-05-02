@@ -55,10 +55,12 @@ public:
     const CableSpan& getCable() const;
 
     Real getSegmentLength(const State& s) const;
-    const Transform& getFrenetFrameStart(const State& s) const {
+    const Transform& getFrenetFrameStart(const State& s) const
+    {
         throw std::runtime_error("NOTYETIMPLEMENTED");
     }
-    const Transform& getFrenetFrameEnd(const State& s) const {
+    const Transform& getFrenetFrameEnd(const State& s) const
+    {
         throw std::runtime_error("NOTYETIMPLEMENTED");
     }
 
@@ -67,22 +69,26 @@ public:
     const ContactGeometry& getContactGeometry() const;
     const Transform& getSurfaceToGroundTransform(const State& s) const;
 
-    Real calcNormalCurvature(Vec3 point, Vec3 tangent) const {
+    Real calcNormalCurvature(Vec3 point, Vec3 tangent) const
+    {
         throw std::runtime_error("NOTYETIMPLEMENTED");
         return NaN;
     }
 
-    Real calcGeodesicTorsion(Vec3 point, Vec3 tangent) const {
+    Real calcGeodesicTorsion(Vec3 point, Vec3 tangent) const
+    {
         throw std::runtime_error("NOTYETIMPLEMENTED");
         return NaN;
     }
 
-    UnitVec3 calcSurfaceNormal(Vec3 point) const {
+    UnitVec3 calcSurfaceNormal(Vec3 point) const
+    {
         throw std::runtime_error("NOTYETIMPLEMENTED");
         return {NaN, NaN, NaN};
     }
 
-    Real calcSurfaceValue(Vec3 point) const {
+    Real calcSurfaceValue(Vec3 point) const
+    {
         throw std::runtime_error("NOTYETIMPLEMENTED");
         return NaN;
     }
@@ -102,8 +108,14 @@ public:
 
 private:
     friend CableSpan;
-    const Impl& getImpl() const {return *m_Impl;}
-    Impl& updImpl() {return *m_Impl;}
+    const Impl& getImpl() const
+    {
+        return *m_Impl;
+    }
+    Impl& updImpl()
+    {
+        return *m_Impl;
+    }
 
     std::shared_ptr<Impl> m_Impl = nullptr;
 };
@@ -118,7 +130,8 @@ public:
     {
         LineSegment() = default;
 
-        LineSegment(Vec3 a, Vec3 b): l((b-a).norm()), d((b-a)/l) {}
+        LineSegment(Vec3 a, Vec3 b) : l((b - a).norm()), d((b - a) / l)
+        {}
 
         Real l = NaN;
         UnitVec3 d{NaN, NaN, NaN};
@@ -146,12 +159,24 @@ public:
 
     Real getLength(const State& state) const;
     Real getLengthDot(const State& state) const;
-    Real calcCablePower(const State& state, Real tension) const {return NaN;}
+    Real calcCablePower(const State& state, Real tension) const
+    {
+        return NaN;
+    }
 
     void applyBodyForces(
         const State& state,
         Real tension,
         Vector_<SpatialVec>& bodyForcesInG) const;
+
+    void calcPathErrorJacobian(
+        const State& state,
+        Vector& pathError,
+        Matrix& pathErrorJacobian) const;
+
+    void applyCorrection(const State& state, const Vector& correction) const;
+
+    size_t countActive(const State& s) const;
 
     /* int calcPathPoints(const State& state, std::vector<Vec3>& points); */
     /* int calcPathFrenetFrames( */

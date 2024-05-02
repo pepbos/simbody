@@ -1159,6 +1159,11 @@ void CableSpan::Impl::calcLineSegments(
     lines.emplace_back(lineStart, p_I);
 }
 
+size_t CableSpan::countActive(const State& s) const
+{
+    return getImpl().countActive(s);
+}
+
 size_t CableSpan::Impl::countActive(const State& s) const
 {
     size_t count = 0;
@@ -1168,6 +1173,99 @@ size_t CableSpan::Impl::countActive(const State& s) const
         }
     }
     return count;
+}
+
+/* template <size_t N> */
+void CableSpan::calcPathErrorJacobian(
+    const State& s,
+    /* const std::array<CoordinateAxis, N>& axes, */
+    Vector& e,
+    Matrix& J) const
+{
+    getImpl().calcPathErrorJacobianUtility(s, e, J);
+}
+
+void CableSpan::applyCorrection(const State& s, const Vector& c) const
+{
+    getImpl().applyCorrection(s, c);
+}
+
+void CableSpan::Impl::applyCorrection(const State& s, const Vector& c) const
+{
+    const size_t nActive = countActive(s);
+    if (nActive * GeodesicDOF != c.size()) {
+        throw std::runtime_error("invalid size of corrections vector");
+    }
+
+    const Correction* corrIt = reinterpret_cast<const Correction*>(&c[0]);
+    for (const CurveSegment& curve : m_CurveSegments) {
+        if (!curve.getImpl().getInstanceEntry(s).isActive()) {
+            continue;
+        }
+        curve.getImpl().applyGeodesicCorrection(s, *corrIt);
+        ++corrIt;
+    }
+
+    // Path has changed: invalidate each segment's cache.
+    invalidatePositionLevelCache(s);
+}
+
+void CableSpan::Impl::invalidatePositionLevelCache(const State& s) const
+{
+    for (const CurveSegment& curve : m_CurveSegments) {
+        curve.getImpl().invalidatePositionLevelCache(s);
+    }
+    getSubsystem().markCacheValueNotRealized(s, m_PosInfoIx);
+}
+
+/* template<size_t N> */
+void CableSpan::Impl::calcPathErrorJacobianUtility(
+    const State& s,
+    /* const std::array<CoordinateAxis, N>& axes, */
+    Vector& e,
+    Matrix& J) const
+{
+    const std::array<CoordinateAxis, 2> axes = {NormalAxis, BinormalAxis};
+    // Force re-realizing the cache.
+    invalidatePositionLevelCache(s);
+    for (const CurveSegment& curve : m_CurveSegments) {
+        curve.getImpl().realizePosition(
+            s,
+            findPrevPoint(s, curve),
+            findNextPoint(s, curve));
+    }
+
+    const size_t nActive = countActive(s);
+
+    if (nActive == 0) {
+        J.resize(0, 0);
+        return;
+    }
+
+    // Grab the shared data cache for computing the matrices, and lock it.
+    SolverData& data =
+        getSubsystem().getImpl().updCachedScratchboard(s).updOrInsert(nActive);
+
+    // Compute the straight-line segments.
+    const Vec3 x_O =
+        m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
+    const Vec3 x_I =
+        m_TerminationBody.getBodyTransform(s).shiftFrameStationToBase(
+            m_TerminationPoint);
+    calcLineSegments(s, x_O, x_I, data.lineSegments);
+
+    // Evaluate path error.
+    calcPathErrorVector<2>(s, data.lineSegments, axes, data.pathError);
+
+    // Evaluate the path error jacobian.
+    calcPathErrorJacobian<2>(
+        s,
+        data.lineSegments,
+        axes,
+        data.pathErrorJacobian);
+
+    e = data.pathError;
+    J = data.pathErrorJacobian;
 }
 
 void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
@@ -1235,17 +1333,17 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         const Correction* corrIt = calcPathCorrections(data);
 
         // Apply path corrections.
-        for (const CurveSegment& obstacle : m_CurveSegments) {
-            if (!obstacle.getImpl().getInstanceEntry(s).isActive()) {
+        for (const CurveSegment& curve : m_CurveSegments) {
+            if (!curve.getImpl().getInstanceEntry(s).isActive()) {
                 continue;
             }
-            obstacle.getImpl().applyGeodesicCorrection(s, *corrIt);
+            curve.getImpl().applyGeodesicCorrection(s, *corrIt);
             ++corrIt;
         }
 
         // Path has changed: invalidate each segment's cache.
-        for (const CurveSegment& obstacle : m_CurveSegments) {
-            obstacle.getImpl().invalidatePositionLevelCache(s);
+        for (const CurveSegment& curve : m_CurveSegments) {
+            curve.getImpl().invalidatePositionLevelCache(s);
         }
     }
 
@@ -1350,24 +1448,25 @@ int CableSpan::Impl::calcDecorativeGeometryAndAppend(
                                       .setLineThickness(2));
         }
 
-        Transform K_P = curve.getPosInfo(s).KP;
-        Transform K_Q = curve.getPosInfo(s).KQ;
+        Transform K_P                            = curve.getPosInfo(s).KP;
+        Transform K_Q                            = curve.getPosInfo(s).KQ;
         const std::array<CoordinateAxis, 3> axes = {
             TangentAxis,
             NormalAxis,
             BinormalAxis};
-        const std::array<Vec3, 3> colors = {
-            Red, Green, Blue};
+        const std::array<Vec3, 3> colors = {Red, Green, Blue};
 
         for (size_t i = 0; i < 3; ++i) {
-            decorations.push_back(DecorativeLine(
-                        K_P.p(),
-                        K_P.p() + 0.5 * K_P.R().getAxisUnitVec(axes.at(i)))
+            decorations.push_back(
+                DecorativeLine(
+                    K_P.p(),
+                    K_P.p() + 0.5 * K_P.R().getAxisUnitVec(axes.at(i)))
                     .setColor(colors.at(i))
                     .setLineThickness(4));
-            decorations.push_back(DecorativeLine(
-                        K_Q.p(),
-                        K_Q.p() + 0.5 * K_Q.R().getAxisUnitVec(axes.at(i)))
+            decorations.push_back(
+                DecorativeLine(
+                    K_Q.p(),
+                    K_Q.p() + 0.5 * K_Q.R().getAxisUnitVec(axes.at(i)))
                     .setColor(colors.at(i))
                     .setLineThickness(4));
         }

@@ -76,8 +76,14 @@ public:
     {
         // Get the previous geodesic.
         const InstanceEntry& cache = getInstanceEntry(s);
-        const Variation& dK_P      = getInstanceEntry(s).dK_P;
-        const FrenetFrame& K_P     = getInstanceEntry(s).K_P;
+        const Variation& dK_P      = cache.dK_P;
+        const FrenetFrame& K_P     = cache.K_P;
+
+        // TODO Frames and Variations stored below should be part of a unti test...
+        const FrenetFrame K0_P = cache.K_P;
+        const FrenetFrame K0_Q = cache.K_Q;
+        const Variation dK0_P  = cache.dK_P;
+        const Variation dK0_Q  = cache.dK_Q;
 
         // Get corrected initial conditions.
         const Vec3 v     = dK_P[1] * c;
@@ -102,6 +108,77 @@ public:
             updInstanceEntry(s));
 
         getSubsystem().markDiscreteVarUpdateValueRealized(s, m_InstanceIx);
+
+        // TODO Below code should be moved to a unit test...
+        const bool DO_UNIT_TEST_HERE = true;
+        if (DO_UNIT_TEST_HERE)
+        {
+            const Real delta = c.norm();
+            const Real eps   = delta / 10.;
+            auto AssertAxis  = [&](const Rotation& R0,
+                    const Rotation& R1,
+                    const Vec3& w,
+                    CoordinateAxis axis) -> bool {
+                const UnitVec3 a0        = R0.getAxisUnitVec(axis);
+                const UnitVec3 a1        = R1.getAxisUnitVec(axis);
+                const Vec3 expected_diff = cross(w, a0);
+                const Vec3 got_diff      = a1 - a0;
+                const bool isOk          = (expected_diff - got_diff).norm() < eps;
+                if (!isOk) {
+                    std::cout << "    a0 = " << R0.transpose() * a0 << "\n";
+                    std::cout << "    a1 = " << R0.transpose() * a1 << "\n";
+                    std::cout << "    expected diff = "
+                        << R0.transpose() * expected_diff / delta << "\n";
+                    std::cout << "    got      dt_Q = "
+                        << R0.transpose() * got_diff / delta << "\n";
+                    std::cout << "    err           = "
+                        << (expected_diff - got_diff).norm() / delta << "\n";
+                }
+                return isOk;
+            };
+
+            auto AssertFrame = [&](const Transform& K0,
+                    const Transform& K1,
+                    const Variation& dK0) -> bool {
+                const Vec3 dx_got      = K1.p() - K0.p();
+                const Vec3 dx_expected = dK0[1] * c;
+                bool isOk              = (dx_expected - dx_got).norm() < eps;
+                if (!isOk) {
+                    std::cout << "Apply variation c = " << c << "\n";
+                    std::cout << "    x0 = " << K0.p() << "\n";
+                    std::cout << "    x1 = " << K1.p() << "\n";
+                    std::cout << "    expected dx_Q = "
+                        << K0.R().transpose() * dx_expected / delta << "\n";
+                    std::cout << "    got      dx_Q = "
+                        << K0.R().transpose() * dx_got / delta << "\n";
+                    std::cout << "    err           = "
+                        << (dx_expected - dx_got).norm() / delta << "\n";
+                    std::cout << "WARNING: Large deviation in final position\n";
+                }
+                const Vec3 w                       = dK0[0] * c;
+                std::array<CoordinateAxis, 3> axes = {
+                    TangentAxis,
+                    NormalAxis,
+                    BinormalAxis};
+                for (size_t i = 0; i < 3; ++i) {
+                    isOk &= AssertAxis(K0.R(), K1.R(), w, axes.at(i));
+                    if (!isOk) {
+                        std::cout << "FAILED axis " << i << "\n";
+                    }
+                }
+
+                return isOk;
+            };
+
+            if (delta > 1e-10) {
+                if (!AssertFrame(K0_P, getInstanceEntry(s).K_P, dK0_P)) {
+                    throw std::runtime_error("Start frame variation check failed");
+                }
+                if (!AssertFrame(K0_Q, getInstanceEntry(s).K_Q, dK0_Q)) {
+                    throw std::runtime_error("End frame variation check failed");
+                }
+            }
+        }
 
         invalidatePositionLevelCache(s);
     }
@@ -405,13 +482,13 @@ public:
         Array_<DecorativeGeometry>& decorations) const
     {
         const InstanceEntry& cache = getInstanceEntry(s);
-        const Transform& X_GS = calcSurfaceFrameInGround(s);
+        const Transform& X_GS      = calcSurfaceFrameInGround(s);
         Vec3 a = X_GS.shiftFrameStationToBase(cache.K_P.p());
         for (size_t i = 1; i < cache.samples.size(); ++i) {
-            const Vec3 b = X_GS.shiftFrameStationToBase(cache.samples.at(i).frame.p());
-            decorations.push_back(DecorativeLine(a, b)
-                    .setColor(Purple)
-                    .setLineThickness(3));
+            const Vec3 b =
+                X_GS.shiftFrameStationToBase(cache.samples.at(i).frame.p());
+            decorations.push_back(
+                DecorativeLine(a, b).setColor(Purple).setLineThickness(3));
             a = b;
         }
     }
@@ -540,14 +617,21 @@ public:
         points.push_back(getPosInfo(state).xI);
     }
 
+    void calcPathErrorJacobianUtility(
+        const State& state,
+        Vector& pathError,
+        Matrix& pathErrorJacobian) const;
+
+    void applyCorrection(const State& state, const Vector& correction) const;
+
+    size_t countActive(const State& s) const;
+
 private:
     PosInfo& updPosInfo(const State& s) const;
     VelInfo& updVelInfo(const State& state) const;
 
     void calcPosInfo(const State& s, PosInfo& posInfo) const;
     void calcVelInfo(const State& s, VelInfo& velInfo) const;
-
-    size_t countActive(const State& s) const;
 
     Vec3 findPrevPoint(const State& state, const CurveSegment& curve) const;
 
