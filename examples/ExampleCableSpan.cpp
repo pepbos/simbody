@@ -308,9 +308,9 @@ int main()
         CableSpan path1(
             cables,
             body1,
-            Vec3(Rad, 0, 0), // origin
+            Vec3(-2*Rad, 0, 0), // origin
             body5,
-            Vec3(0, 0, Rad)); // termination
+            Vec3(2*Rad, 0, 0)); // termination
 
         /* CableObstacle::ViaPoint p1(path1, body2, Rad * UnitVec3(1, 1, 0)); */
 

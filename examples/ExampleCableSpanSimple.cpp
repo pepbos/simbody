@@ -259,13 +259,20 @@ int main()
         Force::UniformGravity gravity(forces, matter, Vec3(0, -9.8, 0));
         // Force::GlobalDamper(forces, matter, 5);
 
-        Body::Rigid ballBody(MassProperties(1.0, Vec3(0), Inertia(1)));
-        const Real Rad = 1.;
-
         MobilizedBody Ground = matter.Ground();
 
+        CableSpan path1(
+            cables,
+            Ground,
+            Vec3(-5., 0.1, 0.),
+            Ground,
+            Vec3(10., 0.0, 0.1));
+
+        Body::Rigid ballBody(MassProperties(1.0, Vec3(0), Inertia(1)));
+        const Real Rad = 1.1;
+
         Vec3 offset = {0., 0., 0.};
-        Vec3 arm = {0.5, 0., 0.};
+        Vec3 arm = {0.25, 0., 0.};
 
         /* UnitVec3 axis0(Vec3{1., 1., 1.}); */
         /* Real angle0 = 0.5; */
@@ -277,18 +284,29 @@ int main()
             ballBody,
             Transform(Vec3{offset - arm}));
 
-        CableSpan path1(
-            cables,
-            Ground,
-            Vec3(-2., 0.1, 0.) + offset, // origin
-            Ground,
-            Vec3(2., 0.0, 0.1) + offset); // termination
-
         // obs4
         path1.adoptWrappingObstacle(
             ball,
             Transform(),
             ContactGeometry::Sphere(Rad),
+            {0., 1., 0.});
+
+        Body::Rigid ball2Body(MassProperties(1.0, Vec3(0), Inertia(1)));
+        const Real Rad2 = 1.1;
+        Vec3 offset2 = {4., 0., 0.};
+        Vec3 arm2 = {0.25, 0., 0.};
+
+        MobilizedBody::Ball ball2(
+            Ground,
+            Transform(Vec3{offset2 + arm2}),
+            ball2Body,
+            Transform(Vec3{- arm2}));
+
+        // obs4
+        path1.adoptWrappingObstacle(
+            ball2,
+            Transform(),
+            ContactGeometry::Sphere(Rad2),
             {0., 1., 0.});
 
         MyCableSpring cable1(forces, path1, 100., 3.5, 0.1);
@@ -302,26 +320,38 @@ int main()
         State s = system.getDefaultState();
 
         Real v = 0.;
-        Random::Gaussian random;
+        bool continuous = false;
+            Random::Gaussian random;
         while(true) {
             system.realize(s, Stage::Position);
             viz.report(s);
             const Real l = path1.getLength(s);
             cout << "path1 init length=" << l << endl;
 
+            {
+            /* Random::Gaussian random; */
             v += random.getValue() * 1e-2;
             v = std::max(-1e-1, v);
             v = std::min(1e-1, v);
+            }
 
-            for (int i = 0; i < s.getNQ(); ++i)
-                s.updQ()[i] += random.getValue() * 5e-1 + v;
-            for (int i = 0; i < s.getNU(); ++i)
+            for (int i = 0; i < s.getNQ(); ++i) {
+            /* Random::Gaussian random; */
+                s.updQ()[i] += random.getValue() * 1e-1 + v;
+            }
+            for (int i = 0; i < s.getNU(); ++i) {
+            /* Random::Gaussian random; */
                 s.updU()[i] += random.getValue() * 1e-3;
-            /* cout << "Hit ENTER ..., or q\n"; */
-            /* const char ch = getchar(); */
-            /* if (ch == 'Q' || ch == 'q') */
-            /*     break; */
+            }
+            if (continuous) {
             sleepInSec(0.1);
+            } else {
+                cout << "Hit ENTER ..., or q\n";
+                const char ch = getchar();
+                if (ch == 'Q' || ch == 'q')
+                    break;
+                continuous = ch == 'c';
+            }
         }
     } catch (const std::exception& e) {
         cout << "EXCEPTION: " << e.what() << "\n";
