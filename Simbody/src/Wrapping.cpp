@@ -708,6 +708,7 @@ void CurveSegment::Impl::shootNewGeodesic(
     Real dsHint,
     InstanceEntry& cache) const
 {
+    cache.samples.clear();
     calcGeodesicAndVariationImplicitly(
         m_Geometry,
         x,
