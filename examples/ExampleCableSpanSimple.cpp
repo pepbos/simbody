@@ -264,22 +264,25 @@ int main()
 
         MobilizedBody Ground = matter.Ground();
 
-        UnitVec3 axis0(Vec3{1., 1., 1.});
-        Real angle0 = 0.5;
-        UnitVec3 axis1(Vec3{1., -2., 3.});
-        Real angle1 = 0.22;
+        Vec3 offset = {0., 0., 0.};
+        Vec3 arm = {0.5, 0., 0.};
+
+        /* UnitVec3 axis0(Vec3{1., 1., 1.}); */
+        /* Real angle0 = 0.5; */
+        /* UnitVec3 axis1(Vec3{1., -2., 3.}); */
+        /* Real angle1 = 0.22; */
         MobilizedBody::Ball ball(
             Ground,
-            Transform(Rotation(angle0, axis0), Vec3{0.}),
+            Transform(Vec3{offset + arm}),
             ballBody,
-            Transform(Rotation(angle1, axis1), Vec3{0.}));
+            Transform(Vec3{offset - arm}));
 
         CableSpan path1(
             cables,
             Ground,
-            Vec3(2., 0.1, 0.), // origin
+            Vec3(-2., 0.1, 0.) + offset, // origin
             Ground,
-            Vec3(-2, 0.0, 0.1)); // termination
+            Vec3(2., 0.0, 0.1) + offset); // termination
 
         // obs4
         path1.adoptWrappingObstacle(
@@ -298,11 +301,28 @@ int main()
         system.realizeTopology();
         State s = system.getDefaultState();
 
-        system.realize(s, Stage::Position);
-        viz.report(s);
-        const Real l = path1.getLength(s);
-        cout << "path1 init length=" << l << endl;
+        Real v = 0.;
+        Random::Gaussian random;
+        while(true) {
+            system.realize(s, Stage::Position);
+            viz.report(s);
+            const Real l = path1.getLength(s);
+            cout << "path1 init length=" << l << endl;
 
+            v += random.getValue() * 1e-2;
+            v = std::max(-1e-1, v);
+            v = std::min(1e-1, v);
+
+            for (int i = 0; i < s.getNQ(); ++i)
+                s.updQ()[i] += random.getValue() * 5e-1 + v;
+            for (int i = 0; i < s.getNU(); ++i)
+                s.updU()[i] += random.getValue() * 1e-3;
+            /* cout << "Hit ENTER ..., or q\n"; */
+            /* const char ch = getchar(); */
+            /* if (ch == 'Q' || ch == 'q') */
+            /*     break; */
+            sleepInSec(0.1);
+        }
     } catch (const std::exception& e) {
         cout << "EXCEPTION: " << e.what() << "\n";
     }
