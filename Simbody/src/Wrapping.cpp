@@ -685,17 +685,12 @@ void CurveSegment::Impl::assertSurfaceBounds(
     const Vec3& prev_QS,
     const Vec3& next_PS) const
 {
-    /* std::cout << "LocalGeodesic::assertSurfaceBounds\n"; */
     // Make sure that the previous point does not lie inside the surface.
     if (calcSurfaceConstraintValue(m_Geometry, prev_QS) < 0.) {
-        std::cout << "prev_QS = " << prev_QS << "\n";
-        std::cout << "prev_PS = " << next_PS << "\n";
         throw std::runtime_error("Unable to wrap over surface: Preceding point "
                                  "lies inside the surface");
     }
     if (calcSurfaceConstraintValue(m_Geometry, next_PS) < 0.) {
-        std::cout << "prev_QS = " << prev_QS << "\n";
-        std::cout << "prev_PS = " << next_PS << "\n";
         throw std::runtime_error(
             "Unable to wrap over surface: Next point lies inside the surface");
     }
@@ -801,12 +796,12 @@ void addDirectionJacobian(
     const LineSegment& e,
     const UnitVec3& axis,
     const PointVariation& dx,
-    std::function<void(const Vec4&)> AddBlock,
+    std::function<void(const Vec4&)>& AddBlock,
     bool invert = false)
 {
     Vec3 y = axis - e.d * dot(e.d, axis);
-    y /= e.l * (invert ? 1. : -1);
-    AddBlock(~dx * y);
+    y /= e.l * (invert ? -1. : 1);
+    AddBlock((~dx) * y);
 }
 
 Real calcPathError(const LineSegment& e, const Rotation& R, CoordinateAxis axis)
@@ -818,11 +813,11 @@ void addPathErrorJacobian(
     const LineSegment& e,
     const UnitVec3& axis,
     const Variation& dK,
-    std::function<void(const Vec4&)> AddBlock,
+    std::function<void(const Vec4&)>& AddBlock,
     bool invertV = false)
 {
     addDirectionJacobian(e, axis, dK[1], AddBlock, invertV);
-    AddBlock(~dK[0] * cross(axis, e.d));
+    AddBlock((~dK[0]) * cross(axis, e.d));
 }
 
 } // namespace
@@ -1026,6 +1021,7 @@ void CableSpan::Impl::calcPathErrorVector(
 {
     size_t lineIx = 0;
     ptrdiff_t row = -1;
+    pathError     *= 0;
 
     for (const CurveSegment& segment : m_CurveSegments) {
         if (!segment.getImpl().getInstanceEntry(s).isActive()) {
@@ -1054,6 +1050,7 @@ void CableSpan::Impl::calcPathErrorJacobian(
 
     // TODO perhaps just not make method static.
     const size_t n = lines.size() - 1;
+    J              *= 0.;
 
     SimTK_ASSERT(
         J.rows() == n * N,
@@ -1081,16 +1078,16 @@ void CableSpan::Impl::calcPathErrorJacobian(
         int blkCol                                = col;
         std::function<void(const Vec4&)> AddBlock = [&](const Vec4& block) {
             for (int ix = 0; ix < 4; ++ix) {
-                J.row(row).col(blkCol + ix) = block[ix];
+                J.row(row).col(blkCol + ix) += block[ix];
             }
         };
 
+        const Variation& dK_P = g.dKP;
         for (CoordinateAxis axis : axes) {
-            const UnitVec3 a_P    = g.KP.R().getAxisUnitVec(axis);
-            const Variation& dK_P = g.dKP;
+            const UnitVec3 a_P = g.KP.R().getAxisUnitVec(axis);
 
-            blkCol                     = col;
-            addPathErrorJacobian(l_P, a_P, dK_P, AddBlock);
+            blkCol = col;
+            addPathErrorJacobian(l_P, a_P, dK_P, AddBlock, false);
 
             if (prev) {
                 const Variation& prev_dK_Q = prev->getImpl().getPosInfo(s).dKQ;
@@ -1100,9 +1097,9 @@ void CableSpan::Impl::calcPathErrorJacobian(
             ++row;
         }
 
+        const Variation& dK_Q = g.dKQ;
         for (CoordinateAxis axis : axes) {
-            const UnitVec3 a_Q    = g.KQ.R().getAxisUnitVec(axis);
-            const Variation& dK_Q = g.dKQ;
+            const UnitVec3 a_Q = g.KQ.R().getAxisUnitVec(axis);
 
             blkCol = col;
             addPathErrorJacobian(l_Q, a_Q, dK_Q, AddBlock, true);
@@ -1110,7 +1107,7 @@ void CableSpan::Impl::calcPathErrorJacobian(
             if (next) {
                 const Variation& next_dK_P = next->getImpl().getPosInfo(s).dKP;
                 blkCol                     = col + Nq;
-                addDirectionJacobian(l_Q, a_Q, next_dK_P[1], AddBlock);
+                addDirectionJacobian(l_Q, a_Q, next_dK_P[1], AddBlock, false);
             }
             ++row;
         }
