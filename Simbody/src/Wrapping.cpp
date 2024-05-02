@@ -595,7 +595,7 @@ const Correction* calcPathCorrections(SolverData& data)
 
     data.mat = data.pathErrorJacobian.transpose() * data.pathErrorJacobian;
     for (int i = 0; i < data.mat.nrow(); ++i) {
-        data.mat[i][i] += w + 1.;
+        data.mat[i][i] += w + 1e-3;
     }
     data.matInv = data.mat;
     data.vec    = data.pathErrorJacobian.transpose() * (data.pathError * (-1.));
@@ -968,7 +968,7 @@ const CurveSegment* CableSpan::Impl::findPrevActiveCurveSegment(
     const State& s,
     CurveSegmentIndex ix) const
 {
-    for (int i = ix - 1; i > 0; --i) {
+    for (int i = ix - 1; i >= 0; --i) {
         // Find the active segment before the current.
         if (m_CurveSegments.at(CurveSegmentIndex(i))
                 .getImpl()
@@ -1072,7 +1072,7 @@ void CableSpan::Impl::calcPathErrorJacobian(
         const GeodesicInfo& g = segment.getImpl().getPosInfo(s);
 
         const LineSegment& l_P = lines.at(activeIx);
-        const LineSegment& l_Q = lines.at(activeIx + 1);
+        const LineSegment& l_Q = lines.at(++activeIx);
 
         const CurveSegmentIndex ix = segment.getImpl().getIndex();
         const CurveSegment* prev   = findPrevActiveCurveSegment(s, ix);
@@ -1081,7 +1081,7 @@ void CableSpan::Impl::calcPathErrorJacobian(
         int blkCol                                = col;
         std::function<void(const Vec4&)> AddBlock = [&](const Vec4& block) {
             for (int ix = 0; ix < 4; ++ix) {
-                J[row][blkCol + ix] = block[ix];
+                J.row(row).col(blkCol + ix) = block[ix];
             }
         };
 
@@ -1089,6 +1089,7 @@ void CableSpan::Impl::calcPathErrorJacobian(
             const UnitVec3 a_P    = g.KP.R().getAxisUnitVec(axis);
             const Variation& dK_P = g.dKP;
 
+            blkCol                     = col;
             addPathErrorJacobian(l_P, a_P, dK_P, AddBlock);
 
             if (prev) {
