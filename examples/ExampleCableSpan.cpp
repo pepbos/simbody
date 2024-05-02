@@ -188,10 +188,10 @@ public:
     ShowStuff(
         const MultibodySystem& mbs,
         const MyCableSpring& cable1,
-        const MyCableSpring& cable2,
+        /* const MyCableSpring& cable2, */
         Real interval) :
         PeriodicEventReporter(interval),
-        mbs(mbs), cable1(cable1), cable2(cable2)
+        mbs(mbs), cable1(cable1)
     {}
 
     static void showHeading(std::ostream& o)
@@ -214,7 +214,7 @@ public:
     void handleEvent(const State& s) const override
     {
         const CableSpan& path1 = cable1.getCable();
-        const CableSpan& path2 = cable2.getCable();
+        /* const CableSpan& path2 = cable2.getCable(); */
         printf(
             "%8g %10.4g %10.4g %10.4g %10.4g %10.4g %10.4g CPU=%g\n",
             s.getTime(),
@@ -224,25 +224,25 @@ public:
             cable1.getTension(s),
             cable1.getDissipatedEnergy(s),
             cpuTime());
-        printf(
-            "%8s %10.4g %10.4g %10.4g %10.4g %10.4g %10.4g %10.4g %10.4g "
-            "%12.6g\n",
-            "",
-            path2.getLength(s),
-            path2.getLengthDot(s),
-            path2.calcCablePower(s, 1), // unit power
-            cable2.getTension(s),
-            cable2.getDissipatedEnergy(s),
-            mbs.calcKineticEnergy(s),
-            mbs.calcPotentialEnergy(s),
-            mbs.calcEnergy(s) + cable1.getDissipatedEnergy(s) +
-                cable2.getDissipatedEnergy(s));
+        /* printf( */
+        /*     "%8s %10.4g %10.4g %10.4g %10.4g %10.4g %10.4g %10.4g %10.4g " */
+        /*     "%12.6g\n", */
+        /*     "", */
+        /*     path2.getLength(s), */
+        /*     path2.getLengthDot(s), */
+        /*     path2.calcCablePower(s, 1), // unit power */
+        /*     cable2.getTension(s), */
+        /*     cable2.getDissipatedEnergy(s), */
+        /*     mbs.calcKineticEnergy(s), */
+        /*     mbs.calcPotentialEnergy(s), */
+        /*     mbs.calcEnergy(s) + cable1.getDissipatedEnergy(s) + */
+        /*         cable2.getDissipatedEnergy(s)); */
         saveStates.push_back(s);
     }
 
 private:
     const MultibodySystem& mbs;
-    MyCableSpring cable1, cable2;
+    MyCableSpring cable1;
 };
 
 int main()
@@ -330,13 +330,13 @@ int main()
 
         MyCableSpring cable1(forces, path1, 100., 3.5, 0.1);
 
-        CableSpan path2(
-            cables,
-            body3,
-            2 * Rad * UnitVec3(1, 1, 1),
-            Ground,
-            Vec3(-2.5, 1, 0));
-        MyCableSpring cable2(forces, path2, 100., 2, 0.1);
+        /* CableSpan path2( */
+        /*     cables, */
+        /*     body3, */
+        /*     2 * Rad * UnitVec3(1, 1, 1), */
+        /*     Ground, */
+        /*     Vec3(-2.5, 1, 0)); */
+        /* MyCableSpring cable2(forces, path2, 100., 2, 0.1); */
 
         // obs1.setPathPreferencePoint(Vec3(2,3,4));
         // obs1.setDecorativeGeometry(DecorativeSphere(0.25).setOpacity(.5));
@@ -345,7 +345,7 @@ int main()
         viz.setShowFrameNumber(true);
         system.addEventReporter(new Visualizer::Reporter(viz, 0.1 * 1. / 30));
         system.addEventReporter(
-            new ShowStuff(system, cable1, cable2, 0.1 * 0.1));
+            new ShowStuff(system, cable1, 0.1 * 0.1));
         // Initialize the system and s.
 
         system.realizeTopology();
@@ -359,7 +359,7 @@ int main()
         system.realize(s, Stage::Position);
         viz.report(s);
         cout << "path1 init length=" << path1.getLength(s) << endl;
-        cout << "path2 init length=" << path2.getLength(s) << endl;
+        /* cout << "path2 init length=" << path2.getLength(s) << endl; */
         cout << "Hit ENTER ...";
         getchar();
 
@@ -375,7 +375,7 @@ int main()
         ts.initialize(s);
         ShowStuff::showHeading(cout);
 
-        const Real finalTime   = 2;
+        const Real finalTime   = 1.;
         const double startTime = realTime();
         ts.stepTo(finalTime);
         cout << "DONE with " << finalTime << "s simulated in "

@@ -9,21 +9,18 @@
 
 using namespace SimTK;
 
-using Correction        = ContactGeometry::GeodesicCorrection;
-using FrameVariation    = ContactGeometry::GeodesicFrameVariation;
-using FrenetFrame       = ContactGeometry::FrenetFrame;
-using GeodesicInfo      = CurveSegment::Impl::PosInfo;
-using LocalGeodesicInfo = CurveSegment::Impl::LocalGeodesic::LocalGeodesicInfo;
-using LocalGeodesicSample =
-    CurveSegment::Impl::LocalGeodesic::LocalGeodesicSample;
-using GeodesicInitialConditions =
-    CurveSegment::Impl::LocalGeodesic::GeodesicInitialConditions;
-using GeodesicJacobian = Vec4;
-using PointVariation   = ContactGeometry::GeodesicPointVariation;
-using Variation        = ContactGeometry::GeodesicVariation;
-using LineSegment      = CableSpan::LineSegment;
-using Status           = CurveSegment::Status;
-using SolverData       = CableSubsystem::Impl::SolverData;
+using Correction          = ContactGeometry::GeodesicCorrection;
+using FrameVariation      = ContactGeometry::GeodesicFrameVariation;
+using FrenetFrame         = ContactGeometry::FrenetFrame;
+using GeodesicInfo        = CurveSegment::Impl::PosInfo;
+using GeodesicJacobian    = Vec4;
+using LineSegment         = CableSpan::LineSegment;
+using LocalGeodesicInfo   = CurveSegment::Impl::InstanceEntry;
+using LocalGeodesicSample = CurveSegment::Impl::LocalGeodesicSample;
+using PointVariation      = ContactGeometry::GeodesicPointVariation;
+using SolverData          = CableSubsystem::Impl::SolverData;
+using Status              = CurveSegment::Status;
+using Variation           = ContactGeometry::GeodesicVariation;
 
 //==============================================================================
 //                                CONSTANTS
@@ -122,19 +119,24 @@ void calcSurfaceProjectionFast(
         x += -g * c / dot(g, g);
     }
 
-    if(it >= maxIter) {throw std::runtime_error(
-        "Surface projection failed: Reached max iterations");
+    if (it >= maxIter) {
+        throw std::runtime_error(
+            "Surface projection failed: Reached max iterations");
     }
 
-    if(std::abs(geometry.calcSurfaceValue(x)) > eps) {throw std::runtime_error(
-        "Surface projection failed: no longer on surface");
+    if (std::abs(geometry.calcSurfaceValue(x)) > eps) {
+        throw std::runtime_error(
+            "Surface projection failed: no longer on surface");
     }
 
     UnitVec3 n(calcSurfaceConstraintGradient(geometry, x));
     t         = t - dot(n, t) * n;
     Real norm = t.norm();
-    if(isNaN(norm)) throw std::runtime_error("Surface projection failed: Detected NaN");
-    if(norm < 1e-13) throw std::runtime_error( "Surface projection failed: Tangent guess is parallel to surface normal");
+    if (isNaN(norm))
+        throw std::runtime_error("Surface projection failed: Detected NaN");
+    if (norm < 1e-13)
+        throw std::runtime_error("Surface projection failed: Tangent guess is "
+                                 "parallel to surface normal");
 
     t = t / norm;
 }
@@ -607,164 +609,17 @@ const Correction* calcPathCorrections(SolverData& data)
         "Invalid size of path corrections vector");
     return reinterpret_cast<const Correction*>(&data.pathCorrection[0]);
 }
+
 } // namespace
-
-//==============================================================================
-//                          GEODESIC INITIAL CONDITIONS
-//==============================================================================
-
-GeodesicInitialConditions GeodesicInitialConditions::CreateCorrected(
-    const FrenetFrame& KP,
-    const Variation& dKP,
-    Real l,
-    const Correction& c)
-{
-    GeodesicInitialConditions g0;
-
-    Vec3 v = dKP[1] * c;
-    g0.x   = KP.p() + v;
-
-    Vec3 w           = dKP[0] * c;
-    const UnitVec3 t = KP.R().getAxisUnitVec(TangentAxis);
-    g0.t             = t + cross(w, t);
-
-    // Take the length correction, and add to the current length.
-    Real dl = c[3]; // Length increment is the last correction element.
-    g0.l    = std::max(l + dl, 0.); // Clamp length to be nonnegative.
-
-    return g0;
-}
-
-GeodesicInitialConditions GeodesicInitialConditions::
-    CreateFromGroundInSurfaceFrame(
-        const Transform& X_GS,
-        Vec3 x_G,
-        Vec3 t_G,
-        Real l)
-{
-    GeodesicInitialConditions g0;
-
-    g0.x = X_GS.shiftBaseStationToFrame(x_G);
-    g0.t = X_GS.xformBaseVecToFrame(t_G);
-    g0.l = l;
-
-    return g0;
-}
-
-GeodesicInitialConditions GeodesicInitialConditions::CreateZeroLengthGuess(
-    Vec3 prev_QS,
-    Vec3 xGuess_S)
-{
-    GeodesicInitialConditions g0;
-
-    g0.x = xGuess_S;
-    g0.t = xGuess_S - prev_QS;
-    g0.l = 0.;
-
-    return g0;
-}
-
-GeodesicInitialConditions GeodesicInitialConditions::CreateAtTouchdown(
-    Vec3 prev_QS,
-    Vec3 next_PS,
-    Vec3 trackingPointOnLine)
-{
-    GeodesicInitialConditions g0;
-
-    g0.x = trackingPointOnLine;
-    g0.t = next_PS - prev_QS;
-    g0.l = 0.;
-
-    return g0;
-}
 
 //==============================================================================
 //                                SURFACE IMPL
 //==============================================================================
-using LocalGeodesic = CurveSegment::Impl::LocalGeodesic;
 
-//------------------------------------------------------------------------------
-//                               REALIZE CACHE
-//------------------------------------------------------------------------------
-void LocalGeodesic::realizeTopology(State& s)
-{
-    // Allocate an auto-update discrete variable for the last computed geodesic.
-    Value<CacheEntry>* cache         = new Value<CacheEntry>();
-    cache->upd().length              = 0.;
-    cache->upd().status              = Status::Liftoff;
-    cache->upd().trackingPointOnLine = getInitialPointGuess();
-
-    m_CacheIx = updSubsystem().allocateAutoUpdateDiscreteVariable(
-        s,
-        Stage::Report,
-        cache,
-        Stage::Position);
-}
-
-void LocalGeodesic::realizePosition(const State& s) const
-{
-    if (!getSubsystem().isDiscreteVarUpdateValueRealized(s, m_CacheIx)) {
-        updCacheEntry(s) = getPrevCacheEntry(s);
-        getSubsystem().markDiscreteVarUpdateValueRealized(s, m_CacheIx);
-    }
-}
-
-//------------------------------------------------------------------------------
-//                               PUBLIC METHODS
-//------------------------------------------------------------------------------
-
-const LocalGeodesicInfo& LocalGeodesic::calcLocalGeodesicInfo(
-    const State& s,
-    Vec3 prev_QS,
-    Vec3 next_PS) const
-{
-    realizePosition(s);
-    CacheEntry& cache = updCacheEntry(s);
-    if (isNaN(cache.length)) {
-        throw std::runtime_error("Found cached length = NaN");
-    }
-    calcCacheEntry(prev_QS, next_PS, cache);
-    return cache;
-}
-
-void LocalGeodesic::applyGeodesicCorrection(const State& s, const Correction& c)
-    const
-{
-    // Get the previous geodesic.
-    const CacheEntry& g = getCacheEntry(s);
-
-    // Get corrected initial conditions.
-    const GeodesicInitialConditions g0 =
-        GeodesicInitialConditions::CreateCorrected(g.K_P, g.dK_P, g.length, c);
-
-    // Shoot the new geodesic.
-    shootNewGeodesic(g0, updCacheEntry(s));
-}
-
-void LocalGeodesic::calcPathPoints(const State& s, std::vector<Vec3>& points)
-    const
-{
-    const CacheEntry& cache = getCacheEntry(s);
-
-    if (analyticFormAvailable()) {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    /*     m_Geometry.resampleGeodesicPointsAnalytically( */
-    /*         cache.K_P, */
-    /*         cache.K_Q, */
-    /*         cache.length, */
-    /*         m_NumberOfAnalyticPoints, */
-    /*         points); */
-    } else {
-        for (const LocalGeodesicSample& sample : cache.samples) {
-            points.push_back(sample.frame.p());
-        }
-    }
-}
-
-void LocalGeodesic::calcLiftoffIfNeeded(
+void CurveSegment::Impl::calcLiftoffIfNeeded(
     const Vec3& prev_QS,
     const Vec3& next_PS,
-    CacheEntry& cache) const
+    CurveSegment::Impl::InstanceEntry& cache) const
 {
     // Only attempt liftoff when currently wrapping the surface.
     LocalGeodesicInfo& g = cache;
@@ -791,10 +646,10 @@ void LocalGeodesic::calcLiftoffIfNeeded(
     cache.trackingPointOnLine = g.K_P.p();
 }
 
-void LocalGeodesic::calcTouchdownIfNeeded(
+void CurveSegment::Impl::calcTouchdownIfNeeded(
     const Vec3& prev_QS,
     const Vec3& next_PS,
-    CacheEntry& cache) const
+    CurveSegment::Impl::InstanceEntry& cache) const
 {
     // Only attempt touchdown when liftoff.
     LocalGeodesicInfo& g = cache;
@@ -804,22 +659,13 @@ void LocalGeodesic::calcTouchdownIfNeeded(
 
     // Detect touchdown by computing the point on the line from x_QS to x_PS
     // that is nearest to the surface.
-    bool touchdownDetected;
-    if (analyticFormAvailable()) {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-        /* touchdownDetected = m_Geometry.calcNearestPointOnLineAnalytically( */
-        /*     prev_QS, */
-        /*     next_PS, */
-        /*     cache.trackingPointOnLine); */
-    } else {
-        touchdownDetected = calcNearestPointOnLineImplicitly(
-            m_Geometry,
-            prev_QS,
-            next_PS,
-            cache.trackingPointOnLine,
-            m_TouchdownIter,
-            m_TouchdownAccuracy);
-    }
+    const bool touchdownDetected = calcNearestPointOnLineImplicitly(
+        m_Geometry,
+        prev_QS,
+        next_PS,
+        cache.trackingPointOnLine,
+        m_TouchdownIter,
+        m_TouchdownAccuracy);
     if (!touchdownDetected) {
         return;
     }
@@ -827,14 +673,15 @@ void LocalGeodesic::calcTouchdownIfNeeded(
     // Touchdown detected: Remove the liftoff status flag.
     g.status = Status::Ok;
     // Shoot a zero length geodesic at the touchdown point.
-    GeodesicInitialConditions g0 = GeodesicInitialConditions::CreateAtTouchdown(
-        prev_QS,
-        next_PS,
-        cache.trackingPointOnLine);
-    shootNewGeodesic(g0, cache);
+    shootNewGeodesic(
+        cache.trackingPointOnLine,
+        next_PS - prev_QS,
+        0.,
+        cache.sHint,
+        cache);
 }
 
-void LocalGeodesic::assertSurfaceBounds(
+void CurveSegment::Impl::assertSurfaceBounds(
     const Vec3& prev_QS,
     const Vec3& next_PS) const
 {
@@ -854,31 +701,18 @@ void LocalGeodesic::assertSurfaceBounds(
     }
 }
 
-void LocalGeodesic::calcCacheEntry(
-    const Vec3& prev_QS,
-    const Vec3& next_PS,
-    CacheEntry& cache) const
-{
-    LocalGeodesicInfo& g = cache;
-
-    if (g.status == Status::Disabled) {
-        return;
-    }
-
-    assertSurfaceBounds(prev_QS, next_PS);
-    calcTouchdownIfNeeded(prev_QS, next_PS, cache);
-    calcLiftoffIfNeeded(prev_QS, next_PS, cache);
-}
-
-void LocalGeodesic::shootNewGeodesic(
-    const GeodesicInitialConditions& g0,
-    CacheEntry& cache) const
+void CurveSegment::Impl::shootNewGeodesic(
+    Vec3 x,
+    Vec3 t,
+    Real l,
+    Real dsHint,
+    InstanceEntry& cache) const
 {
     calcGeodesicAndVariationImplicitly(
         m_Geometry,
-        g0.x,
-        g0.t,
-        g0.l,
+        x,
+        t,
+        l,
         cache.sHint,
         cache.K_P,
         cache.dK_P,
@@ -888,41 +722,7 @@ void LocalGeodesic::shootNewGeodesic(
         m_ProjectionMaxIter,
         m_ProjectionAccuracy,
         cache.samples);
-    cache.length = g0.l;
-
-    /* using Y  = ImplicitGeodesicState; */
-    /* if (analyticFormAvailable()) { */
-
-    /*     m_Geometry.calcGeodesicWithVariationAnalytically( */
-    /*         g0.x, */
-    /*         g0.t, */
-    /*         g0.l, */
-    /*         cache.KP, */
-    /*         cache.dKP, */
-    /*         cache.KQ, */
-    /*         cache.dKQ); */
-    /* } else { */
-    /*     // Compute geodesic start boundary frame and variation. */
-    /*     m_Geometry.calcNearestFrenetFrameImplicitlyFast( */
-    /*         g0.x, */
-    /*         g0.t, */
-    /*         cache.KP, */
-    /*         m_ProjectionMaxIter, */
-    /*         m_ProjectionRequiredAccuracy); */
-    /*     m_Geometry.calcGeodesicStartFrameVariationImplicitly( */
-    /*         cache.KP, */
-    /*         cache.dKP); */
-    /*     // Compute geodesic end boundary frame amd variation (shoot new */
-    /*     // geodesic). */
-    /*     m_Geometry.calcGeodesicEndFrameVariationImplicitly( */
-    /*         cache.KP, */
-    /*         g0.l, */
-    /*         cache.KQ, */
-    /*         cache.dKQ, */
-    /*         cache.sHint, */
-    /*         m_IntegratorAccuracy, */
-    /*         cache.frames); */
-    /* } */
+    cache.length = l;
 }
 
 //==============================================================================
@@ -953,13 +753,13 @@ const CableSpan& CurveSegment::getCable() const
 Real CurveSegment::getSegmentLength(const State& s) const
 {
     getImpl().realizeCablePosition(s);
-    return getImpl().getPosInfo(s).length;
+    return getImpl().getInstanceEntry(s).length;
 }
 
 CurveSegment::Status CurveSegment::getStatus(const State& s) const
 {
     getImpl().realizeCablePosition(s);
-    return getImpl().getStatus(s);
+    return getImpl().getInstanceEntry(s).status;
 }
 
 //==============================================================================
@@ -974,157 +774,17 @@ CurveSegment::Impl::Impl(
     Vec3 initPointGuess) :
     m_Subsystem(&path.updImpl().updSubsystem()),
     m_Path(path), m_Index(-1), // TODO what to do with this index, and when
-    m_Mobod(mobod), m_Offset(X_BS),
-    m_Geodesic(path.updImpl().updSubsystem(), geometry, initPointGuess),
+    m_Mobod(mobod), m_Offset(X_BS), m_Geometry(geometry),
+    m_InitPointGuess(initPointGuess),
     m_Decoration(geometry.createDecorativeGeometry()
-             .setColor(Orange).setOpacity(.75).setResolution(3))
+                     .setColor(Orange)
+                     .setOpacity(.75)
+                     .setResolution(3))
 {}
-
-void CurveSegment::Impl::realizeTopology(State& s)
-{
-    m_Geodesic.realizeTopology(s);
-
-    PosInfo posInfo{};
-    m_PosInfoIx = updSubsystem().allocateCacheEntry(
-        s,
-        Stage::Position,
-        new Value<PosInfo>(posInfo));
-}
-
-void CurveSegment::Impl::realizePosition(const State& s) const
-{
-    if (!getSubsystem().isCacheValueRealized(s, m_PosInfoIx)) {
-        calcPosInfo(s, updPosInfo(s));
-        getSubsystem().markCacheValueRealized(s, m_PosInfoIx);
-    }
-}
 
 void CurveSegment::Impl::realizeCablePosition(const State& s) const
 {
     m_Path.getImpl().realizePosition(s);
-}
-
-void CurveSegment::Impl::invalidatePositionLevelCache(const State& state) const
-{
-    getSubsystem().markCacheValueNotRealized(state, m_PosInfoIx);
-    /* m_Path.getImpl().invalidatePositionLevelCache(state); */
-}
-
-void CurveSegment::Impl::applyGeodesicCorrection(
-    const State& s,
-    const CurveSegment::Impl::Correction& c) const
-{
-    /* std::cout << "apply correction = " << c << "\n"; */
-    // Apply correction to curve.
-    m_Geodesic.applyGeodesicCorrection(s, c);
-
-    // Invalidate position level cache.
-    /* invalidatePositionLevelCache(s); */
-}
-
-void CurveSegment::Impl::calcPathPoints(
-    const State& s,
-    std::vector<Vec3>& points) const
-{
-    if (!isActive(s)) {
-        return;
-    }
-    const PosInfo& ppe    = getPosInfo(s);
-    const Transform& X_GS = ppe.X_GS;
-    size_t initSize       = points.size();
-    m_Geodesic.calcPathPoints(s, points);
-    for (size_t i = points.size() - initSize; i < points.size(); ++i) {
-        points.at(i) = X_GS.shiftFrameStationToBase(points.at(i));
-    }
-}
-
-namespace
-{
-void xformSurfaceGeodesicToGround(
-    const LocalGeodesicInfo& geodesic_S,
-    const Transform& X_GS,
-    CurveSegment::Impl::PosInfo& geodesic_G)
-{
-    geodesic_G.X_GS = X_GS;
-
-    // Store the the local geodesic in ground frame.
-    geodesic_G.KP = X_GS.compose(geodesic_S.K_P);
-    geodesic_G.KQ = X_GS.compose(geodesic_S.K_Q);
-
-    geodesic_G.dKP[0] = X_GS.R() * geodesic_S.dK_P[0];
-    geodesic_G.dKP[1] = X_GS.R() * geodesic_S.dK_P[1];
-
-    geodesic_G.dKQ[0] = X_GS.R() * geodesic_S.dK_Q[0];
-    geodesic_G.dKQ[1] = X_GS.R() * geodesic_S.dK_Q[1];
-
-    geodesic_G.length = geodesic_S.length;
-}
-} // namespace
-
-void CurveSegment::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
-{
-    if (m_Geodesic.getStatus(s) == Status::Disabled) {
-        return;
-    }
-
-    // Compute tramsform from local surface frame to ground.
-    const Transform& X_GS = calcSurfaceFrameInGround(s);
-
-    // Get the path points before and after this segment.
-    const Vec3 prev_G = m_Path.getImpl().findPrevPoint(s, m_Index);
-    const Vec3 next_G = m_Path.getImpl().findNextPoint(s, m_Index);
-
-    // Transform the prev and next path points to the surface frame.
-    const Vec3 prev_S = X_GS.shiftBaseStationToFrame(prev_G);
-    const Vec3 next_S = X_GS.shiftBaseStationToFrame(next_G);
-
-    // Detect liftoff, touchdown and potential invalid configurations.
-    // TODO this doesnt follow the regular invalidation scheme...
-    // Grab the last geodesic that was computed.
-    const LocalGeodesicInfo& geodesic_S =
-        m_Geodesic.calcLocalGeodesicInfo(s, prev_S, next_S);
-
-    // Store the the local geodesic in ground frame.
-    xformSurfaceGeodesicToGround(geodesic_S, X_GS, updPosInfo(s));
-}
-
-SpatialVec CurveSegment::Impl::calcAppliedWrenchInGround(
-    const State& s,
-    Real tension) const
-{
-    const PosInfo& posInfo = getPosInfo(s);
-
-    const UnitVec3& t_P = posInfo.KP.R().getAxisUnitVec(TangentAxis);
-    const UnitVec3& t_Q = posInfo.KQ.R().getAxisUnitVec(TangentAxis);
-    const Vec3 F_G      = tension * (t_Q - t_P);
-
-    const Transform& X_GB = m_Mobod.getBodyTransform(s);
-    const Vec3 x_GB = X_GB.p();
-    const Vec3 r_P = posInfo.KP.p() - x_GB;
-    const Vec3 r_Q = posInfo.KQ.p() - x_GB;
-    const Vec3 M_G  = tension * (r_Q % t_Q - r_P % t_P);
-
-    return {M_G, F_G};
-}
-
-void CurveSegment::Impl::applyBodyForce(
-    const State& s,
-    Real tension,
-    Vector_<SpatialVec>& bodyForcesInG) const
-{
-    // TODO why?
-    if (tension <= 0) {
-        return;
-    }
-
-    if (getStatus(s) != Status::Ok) {
-        return;
-    }
-
-    m_Mobod.applyBodyForce(
-        s,
-        calcAppliedWrenchInGround(s, tension),
-        bodyForcesInG);
 }
 
 //==============================================================================
@@ -1258,14 +918,11 @@ void CableSpan::Impl::realizeTopology(State& s)
 
 void CableSpan::Impl::realizePosition(const State& s) const
 {
-    std::cout << "Cablespan: realizePosition\n";
     if (getSubsystem().isCacheValueRealized(s, m_PosInfoIx)) {
         return;
     }
     calcPosInfo(s, updPosInfo(s));
     getSubsystem().markCacheValueRealized(s, m_PosInfoIx);
-    std::cout << "done Path calcPosInfo\n";
-    std::cout << "    l = " << getPosInfo(s).l << "\n";
 }
 
 void CableSpan::Impl::realizeVelocity(const State& s) const
@@ -1276,12 +933,6 @@ void CableSpan::Impl::realizeVelocity(const State& s) const
     }
     calcVelInfo(s, updVelInfo(s));
     getSubsystem().markCacheValueRealized(s, m_VelInfoIx);
-}
-
-void CableSpan::Impl::invalidatePositionLevelCache(const State& s) const
-{
-    getSubsystem().markCacheValueNotRealized(s, m_PosInfoIx);
-    getSubsystem().markCacheValueNotRealized(s, m_VelInfoIx);
 }
 
 const CableSpan::Impl::PosInfo& CableSpan::Impl::getPosInfo(
@@ -1302,7 +953,8 @@ const CableSpan::Impl::VelInfo& CableSpan::Impl::getVelInfo(
     const State& s) const
 {
     realizeVelocity(s);
-    return Value<VelInfo>::downcast(getSubsystem().getCacheEntry(s, m_VelInfoIx));
+    return Value<VelInfo>::downcast(
+        getSubsystem().getCacheEntry(s, m_VelInfoIx));
 }
 
 CableSpan::Impl::VelInfo& CableSpan::Impl::updVelInfo(const State& s) const
@@ -1317,7 +969,10 @@ const CurveSegment* CableSpan::Impl::findPrevActiveCurveSegment(
 {
     for (int i = ix - 1; i > 0; --i) {
         // Find the active segment before the current.
-        if (m_CurveSegments.at(CurveSegmentIndex(i)).getImpl().isActive(s)) {
+        if (m_CurveSegments.at(CurveSegmentIndex(i))
+                .getImpl()
+                .getInstanceEntry(s)
+                .isActive()) {
             return &m_CurveSegments.at(CurveSegmentIndex(i));
         }
     }
@@ -1330,26 +985,33 @@ const CurveSegment* CableSpan::Impl::findNextActiveCurveSegment(
 {
     // Find the active segment after the current.
     for (int i = ix + 1; i < m_CurveSegments.size(); ++i) {
-        if (m_CurveSegments.at(CurveSegmentIndex(i)).getImpl().isActive(s)) {
+        if (m_CurveSegments.at(CurveSegmentIndex(i))
+                .getImpl()
+                .getInstanceEntry(s)
+                .isActive()) {
             return &m_CurveSegments.at(CurveSegmentIndex(i));
         }
     }
     return nullptr;
 }
 
-Vec3 CableSpan::Impl::findPrevPoint(const State& s, CurveSegmentIndex ix) const
+Vec3 CableSpan::Impl::findPrevPoint(const State& s, const CurveSegment& curve)
+    const
 {
-    const CurveSegment* segment = findPrevActiveCurveSegment(s, ix);
-    return segment ? segment->getImpl().getPosInfo(s).KQ.p()
+    const CurveSegment* segment =
+        findPrevActiveCurveSegment(s, curve.getImpl().getIndex());
+    return segment ? segment->getImpl().calcFinalContactPoint(s)
                    : m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(
                          m_OriginPoint);
 }
 
-Vec3 CableSpan::Impl::findNextPoint(const State& s, CurveSegmentIndex ix) const
+Vec3 CableSpan::Impl::findNextPoint(const State& s, const CurveSegment& curve)
+    const
 {
-    const CurveSegment* segment = findNextActiveCurveSegment(s, ix);
+    const CurveSegment* segment =
+        findNextActiveCurveSegment(s, curve.getImpl().getIndex());
     return segment
-               ? segment->getImpl().getPosInfo(s).KP.p()
+               ? segment->getImpl().calcInitialContactPoint(s)
                : m_TerminationBody.getBodyTransform(s).shiftFrameStationToBase(
                      m_TerminationPoint);
 }
@@ -1364,9 +1026,8 @@ void CableSpan::Impl::calcPathErrorVector(
     size_t lineIx = 0;
     ptrdiff_t row = -1;
 
-    for (int i = 0; i < getNumCurveSegments(); ++i) {
-        const CurveSegment& segment = getCurveSegment(CurveSegmentIndex(i));
-        if (!segment.getImpl().isActive(s)) {
+    for (const CurveSegment& segment : m_CurveSegments) {
+        if (!segment.getImpl().getInstanceEntry(s).isActive()) {
             continue;
         }
 
@@ -1404,7 +1065,7 @@ void CableSpan::Impl::calcPathErrorJacobian(
     size_t col      = 0;
     size_t activeIx = 0;
     for (const CurveSegment& segment : m_CurveSegments) {
-        if (!segment.getImpl().isActive(s)) {
+        if (!segment.getImpl().getInstanceEntry(s).isActive()) {
             continue;
         }
         const GeodesicInfo& g = segment.getImpl().getPosInfo(s);
@@ -1467,10 +1128,10 @@ Real CableSpan::Impl::calcPathLength(
     }
 
     for (const CurveSegment& segment : m_CurveSegments) {
-        if (!segment.getImpl().isActive(s)) {
+        if (!segment.getImpl().getInstanceEntry(s).isActive()) {
             continue;
         }
-        lTot += segment.getImpl().getPosInfo(s).length;
+        lTot += segment.getImpl().getInstanceEntry(s).length;
     }
     return lTot;
 }
@@ -1486,7 +1147,7 @@ void CableSpan::Impl::calcLineSegments(
 
     Vec3 lineStart = std::move(p_O);
     for (const CurveSegment& segment : m_CurveSegments) {
-        if (!segment.getImpl().isActive(s)) {
+        if (!segment.getImpl().getInstanceEntry(s).isActive()) {
             continue;
         }
 
@@ -1503,7 +1164,7 @@ size_t CableSpan::Impl::countActive(const State& s) const
 {
     size_t count = 0;
     for (const CurveSegment& segment : m_CurveSegments) {
-        if (segment.getImpl().isActive(s)) {
+        if (segment.getImpl().getInstanceEntry(s).isActive()) {
             ++count;
         }
     }
@@ -1526,6 +1187,14 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 
     for (posInfo.loopIter = 0; posInfo.loopIter < m_PathMaxIter;
          ++posInfo.loopIter) {
+
+        for (const CurveSegment& curve : m_CurveSegments) {
+            curve.getImpl().realizePosition(
+                s,
+                findPrevPoint(s, curve),
+                findNextPoint(s, curve));
+        }
+
         const size_t nActive = countActive(s);
 
         if (nActive == 0) {
@@ -1535,7 +1204,8 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 
         // Grab the shared data cache for computing the matrices, and lock it.
         SolverData& data =
-            getSubsystem().getImpl().updCachedScratchboard(s).updOrInsert(nActive);
+            getSubsystem().getImpl().updCachedScratchboard(s).updOrInsert(
+                nActive);
 
         // Compute the straight-line segments.
         calcLineSegments(s, x_O, x_I, data.lineSegments);
@@ -1545,11 +1215,11 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         const Real maxPathError = data.pathError.normInf();
         if (maxPathError < m_PathErrorBound) {
             posInfo.l = 0.;
-            for (const LineSegment& line: data.lineSegments) {
+            for (const LineSegment& line : data.lineSegments) {
                 posInfo.l += line.l;
             }
-            for (const CurveSegment& curve: m_CurveSegments) {
-                posInfo.l += curve.getImpl().getPosInfo(s).length;
+            for (const CurveSegment& curve : m_CurveSegments) {
+                posInfo.l += curve.getImpl().getInstanceEntry(s).length;
             }
             return;
         }
@@ -1566,7 +1236,7 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 
         // Apply path corrections.
         for (const CurveSegment& obstacle : m_CurveSegments) {
-            if (!obstacle.getImpl().isActive(s)) {
+            if (!obstacle.getImpl().getInstanceEntry(s).isActive()) {
                 continue;
             }
             obstacle.getImpl().applyGeodesicCorrection(s, *corrIt);
@@ -1591,7 +1261,7 @@ void CableSpan::Impl::calcVelInfo(const State& s, VelInfo& velInfo) const
     Vec3 v_GQ = m_OriginBody.findStationVelocityInGround(s, m_OriginPoint);
     const CurveSegment* lastActive = nullptr;
     for (const CurveSegment& obstacle : m_CurveSegments) {
-        if (!obstacle.getImpl().isActive(s)) {
+        if (!obstacle.getImpl().getInstanceEntry(s).isActive()) {
             continue;
         }
 
@@ -1655,7 +1325,6 @@ int CableSpan::Impl::calcDecorativeGeometryAndAppend(
     /*         .setColor(Purple) */
     /*         .setLineThickness(3)); */
 
-    Vec3 lastCurvePoint = ppe.xO;
     for (const CurveSegment& curveSegment : m_CurveSegments) {
         const CurveSegment::Impl& curve = curveSegment.getImpl();
 
@@ -1664,7 +1333,7 @@ int CableSpan::Impl::calcDecorativeGeometryAndAppend(
         const Transform& X_SD  = geo.getTransform(); // TODO getTransform?
 
         // Inactive surfaces are dimmed.
-        if (!curve.isActive(s)) {
+        if (!curve.getInstanceEntry(s).isActive()) {
             decorations.push_back(geo.setTransform(X_GS * X_SD)
                                       .setColor(Real(0.75) * geo.getColor()));
             continue;
@@ -1672,23 +1341,36 @@ int CableSpan::Impl::calcDecorativeGeometryAndAppend(
 
         decorations.push_back(geo.setTransform(X_GS * X_SD));
 
-        Vec3 prevPoint = findPrevPoint(s, curve.getIndex());
-        Vec3 x_P       = curve.getPosInfo(s).KP.p();
+        {
+            const Vec3 prevPoint = findPrevPoint(s, curveSegment);
+            const Vec3 x_P       = curve.getPosInfo(s).KP.p();
 
-        /* decorations.push_back(DecorativeLine(prevPoint, x_P) */
-        /*                           .setColor(Purple) */
-        /*                           .setLineThickness(3)); */
-
-        lastCurvePoint = curve.getPosInfo(s).KQ.p();
+            decorations.push_back(DecorativeLine(prevPoint, x_P)
+                                      .setColor(Purple)
+                                      .setLineThickness(3));
+        }
 
         Transform K_P = curve.getPosInfo(s).KP;
         Transform K_Q = curve.getPosInfo(s).KQ;
-        decorations.push_back(DecorativeLine(K_P.p(), K_P.p() + K_P.R().getAxisUnitVec(TangentAxis))
+        decorations.push_back(DecorativeLine(
+                                  K_P.p(),
+                                  K_P.p() + K_P.R().getAxisUnitVec(NormalAxis))
                                   .setColor(Orange)
                                   .setLineThickness(3));
-        decorations.push_back(DecorativeLine(K_Q.p(), K_Q.p() + K_Q.R().getAxisUnitVec(TangentAxis))
+        decorations.push_back(DecorativeLine(
+                                  K_Q.p(),
+                                  K_Q.p() + K_Q.R().getAxisUnitVec(NormalAxis))
                                   .setColor(Blue)
                                   .setLineThickness(3));
+
+        {
+            const Vec3 nextPoint = findNextPoint(s, curveSegment);
+            const Vec3 x_Q       = curve.getPosInfo(s).KQ.p();
+
+            decorations.push_back(DecorativeLine(nextPoint, x_Q)
+                                      .setColor(Green)
+                                      .setLineThickness(3));
+        }
     }
 
     /* decorations.push_back(DecorativeLine(lastCurvePoint, ppe.xI) */

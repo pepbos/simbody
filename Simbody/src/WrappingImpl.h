@@ -25,218 +25,6 @@ public:
     using Variation   = ContactGeometry::GeodesicVariation;
     using Correction  = ContactGeometry::GeodesicCorrection;
 
-    //==============================================================================
-    //                      ???
-    //==============================================================================
-    // Represents the local surface wrapping problem.
-    // Caches last computed geodesic as a warmstart.
-    // Not exposed outside of simbody.
-    // Not shared amongst different paths/spans or obstacles/CurveSegments.
-    class LocalGeodesic
-    {
-        using FrenetFrame = ContactGeometry::FrenetFrame;
-        using Variation   = ContactGeometry::GeodesicVariation;
-        using Correction  = ContactGeometry::GeodesicCorrection;
-
-    public:
-        LocalGeodesic()                                    = default;
-        ~LocalGeodesic()                                   = default;
-        LocalGeodesic(LocalGeodesic&&) noexcept            = default;
-        LocalGeodesic& operator=(LocalGeodesic&&) noexcept = default;
-        LocalGeodesic(const LocalGeodesic&)                = delete;
-        LocalGeodesic& operator=(const LocalGeodesic&)     = delete;
-
-        LocalGeodesic(
-            CableSubsystem& subsystem,
-            ContactGeometry geometry,
-            Vec3 initPointGuess) :
-            m_Subsystem(&subsystem),
-            m_Geometry(geometry), m_InitPointGuess(initPointGuess)
-        {}
-
-        // Allocate state variables and cache entries.
-        void realizeTopology(State& state);
-        void realizePosition(const State& state) const;
-
-        // Some info that can be retrieved from cache.
-        struct LocalGeodesicInfo
-        {
-            FrenetFrame K_P{};
-            FrenetFrame K_Q{};
-
-            Real length = NaN;
-
-            Variation dK_P{};
-            Variation dK_Q{};
-
-            Status status = Status::Liftoff;
-        };
-
-        // Helper struct: Required data for shooting a new geodesic.
-        struct GeodesicInitialConditions
-        {
-        private:
-            GeodesicInitialConditions() = default;
-
-        public:
-            static GeodesicInitialConditions CreateCorrected(
-                const FrenetFrame& KP,
-                const Variation& dKP,
-                Real l,
-                const Correction& c);
-            // TODO remove this ctor.
-            static GeodesicInitialConditions CreateFromGroundInSurfaceFrame(
-                const Transform& X_GS,
-                Vec3 x_G,
-                Vec3 t_G,
-                Real l);
-            static GeodesicInitialConditions CreateZeroLengthGuess(
-                Vec3 prev_QS,
-                Vec3 xGuess_S);
-            static GeodesicInitialConditions CreateAtTouchdown(
-                Vec3 prev_QS,
-                Vec3 next_PS,
-                Vec3 trackingPointOnLine);
-
-            Vec3 x{NaN, NaN, NaN};
-            Vec3 t{NaN, NaN, NaN};
-            Real l = NaN;
-        };
-
-        bool analyticFormAvailable() const
-        {
-            // TODO
-            /* return m_Geometry.analyticFormAvailable(); */
-            return false;
-        }
-
-        // This will reevaluate the cached geodesic and status.
-        // This will be called by the curve segment before updating the
-        // position level cache variable of the CurveSegment.
-        // TODO Unfortunate naming convention.
-        const LocalGeodesicInfo& calcLocalGeodesicInfo(
-            const State& s,
-            Vec3 prev_QS,
-            Vec3 next_PS) const; // TODO weird name
-
-        // Apply the correction to the initial condition of the geodesic, and
-        // shoot a new geodesic, updating the cache variable.
-        void applyGeodesicCorrection(const State& s, const Correction& c) const;
-
-        // Compute the path points of the current geodesic, and write them to
-        // the buffer. These points are in local surface coordinates. Returns
-        // the number of points written.
-        void calcPathPoints(const State& state, std::vector<Vec3>& points)
-            const;
-
-        // Set the user defined point that controls the initial wrapping path.
-        void setInitialPointGuess(Vec3 initPointGuess)
-        {
-            m_InitPointGuess = initPointGuess;
-        }
-
-        // Get the user defined point that controls the initial wrapping path.
-        Vec3 getInitialPointGuess() const
-        {
-            return m_InitPointGuess;
-        }
-
-        Status getStatus(const State& s) const
-        {
-            return getCacheEntry(s).status;
-        }
-
-        struct LocalGeodesicSample
-        {
-            LocalGeodesicSample(Real l, FrenetFrame K) : length(l), frame(K) {}
-            Real length;
-            FrenetFrame frame;
-        };
-
-        CableSubsystem& updSubsystem() {return *m_Subsystem;}
-        const CableSubsystem& getSubsystem() const {return *m_Subsystem;}
-
-    private:
-        // The cache entry: Curve in local surface coordinated.
-        // This is an auto update discrete cache variable, which makes it
-        // persist over integration steps.
-        // TODO or should it be "normal" discrete?
-        struct CacheEntry : LocalGeodesicInfo
-        {
-            Vec3 trackingPointOnLine{NaN, NaN, NaN};
-            std::vector<LocalGeodesicSample> samples;
-            double sHint = NaN;
-            int count = 0;
-        };
-
-        const CacheEntry& getCacheEntry(const State& s) const
-        {
-            realizePosition(s);
-            return Value<CacheEntry>::downcast(
-                getSubsystem().getDiscreteVarUpdateValue(s, m_CacheIx));
-        }
-
-        CacheEntry& updCacheEntry(const State& state) const
-        {
-            return Value<CacheEntry>::updDowncast(
-                getSubsystem().updDiscreteVarUpdateValue(state, m_CacheIx));
-        }
-
-        const CacheEntry& getPrevCacheEntry(const State& state) const
-        {
-            return Value<CacheEntry>::downcast(
-                getSubsystem().getDiscreteVariable(state, m_CacheIx));
-        }
-
-        CacheEntry& updPrevCacheEntry(State& state) const
-        {
-            return Value<CacheEntry>::updDowncast(
-                getSubsystem().updDiscreteVariable(state, m_CacheIx));
-        }
-
-        void calcCacheEntry(
-            const Vec3& prev_QS,
-            const Vec3& next_PS,
-            CacheEntry& cache) const;
-
-        void assertSurfaceBounds(const Vec3& prev_QS, const Vec3& next_PS)
-            const;
-
-        void calcTouchdownIfNeeded(
-            const Vec3& prev_QS,
-            const Vec3& next_PS,
-            CacheEntry& cache) const;
-
-        void calcLiftoffIfNeeded(
-            const Vec3& prev_QS,
-            const Vec3& next_PS,
-            CacheEntry& cache) const;
-
-        void shootNewGeodesic(
-            const GeodesicInitialConditions& g0,
-            CacheEntry& cache) const;
-
-        //------------------------------------------------------------------------------
-        CableSubsystem* m_Subsystem; // TODO just a pointer?
-
-        ContactGeometry m_Geometry;
-
-        Vec3 m_InitPointGuess;
-
-        size_t m_ProjectionMaxIter = 10;
-        Real m_ProjectionAccuracy  = 1e-10;
-        Real m_IntegratorAccuracy  = 1e-6;
-
-        Real m_TouchdownAccuracy = 1e-3;
-        size_t m_TouchdownIter   = 10;
-
-        // TODO this must be a function argument such that the caller can
-        // decide,
-        size_t m_NumberOfAnalyticPoints = 10;
-
-        DiscreteVariableIndex m_CacheIx;
-    };
-
 public:
     Impl()                              = delete;
     Impl(const Impl& source)            = delete;
@@ -251,6 +39,150 @@ public:
         ContactGeometry geometry,
         Vec3 initPointGuess);
 
+    struct LocalGeodesicSample
+    {
+        LocalGeodesicSample(Real l, FrenetFrame K) : length(l), frame(K)
+        {}
+
+        Real length;
+        FrenetFrame frame;
+    };
+
+    struct InstanceEntry
+    {
+        bool isActive() const
+        {
+            return status == Status::Ok;
+        }
+
+        FrenetFrame K_P{};
+        FrenetFrame K_Q{};
+
+        Real length = NaN;
+
+        Variation dK_P{};
+        Variation dK_Q{};
+
+        std::vector<LocalGeodesicSample> samples;
+        double sHint = NaN;
+
+        Vec3 trackingPointOnLine{NaN, NaN, NaN};
+        Status status = Status::Liftoff;
+    };
+
+    // Apply the correction to the initial condition of the geodesic, and
+    // shoot a new geodesic, updating the cache variable.
+    void applyGeodesicCorrection(const State& s, const Correction& c) const
+    {
+        // Get the previous geodesic.
+        const InstanceEntry& cache = getInstanceEntry(s);
+        const Variation& dK_P      = getInstanceEntry(s).dK_P;
+        const FrenetFrame& K_P     = getInstanceEntry(s).K_P;
+
+        // Get corrected initial conditions.
+        const Vec3 v     = dK_P[1] * c;
+        const Vec3 point = K_P.p() + v;
+
+        const Vec3 w       = dK_P[0] * c;
+        const UnitVec3 t   = K_P.R().getAxisUnitVec(TangentAxis);
+        const Vec3 tangent = t + cross(w, t);
+
+        // Take the length correction, and add to the current length.
+        const Real dl =
+            c[3]; // Length increment is the last correction element.
+        const Real length =
+            std::max(cache.length + dl, 0.); // Clamp length to be nonnegative.
+
+        // Shoot the new geodesic.
+        shootNewGeodesic(
+            point,
+            tangent,
+            length,
+            cache.sHint,
+            updInstanceEntry(s));
+
+        getSubsystem().markDiscreteVarUpdateValueRealized(s, m_InstanceIx);
+
+        invalidatePositionLevelCache(s);
+    }
+
+    // Compute the path points of the current geodesic, and write them to
+    // the buffer. These points are in local surface coordinates. Returns
+    // the number of points written.
+    void calcPathPoints(const State& s, std::vector<Vec3>& points) const
+    {
+        const Transform& X_GS           = getPosInfo(s).X_GS;
+        const InstanceEntry& geodesic_S = getInstanceEntry(s);
+        if (!geodesic_S.isActive()) {
+            return;
+        }
+        for (const LocalGeodesicSample& sample : geodesic_S.samples) {
+            points.push_back(X_GS.shiftFrameStationToBase(sample.frame.p()));
+        }
+    }
+
+    // Set the user defined point that controls the initial wrapping path.
+    // Point is in surface coordinates.
+    void setInitialPointGuess(Vec3 initPointGuess)
+    {
+        m_InitPointGuess = initPointGuess;
+    }
+
+    // Get the user defined point that controls the initial wrapping path.
+    Vec3 getInitialPointGuess() const
+    {
+        return m_InitPointGuess;
+    }
+
+    const InstanceEntry& getInstanceEntry(const State& s) const
+    {
+        const CableSubsystem& subsystem = getSubsystem();
+        if (!subsystem.isDiscreteVarUpdateValueRealized(s, m_InstanceIx)) {
+            updInstanceEntry(s) = getPrevInstanceEntry(s);
+            subsystem.markDiscreteVarUpdateValueRealized(s, m_InstanceIx);
+        }
+        return Value<InstanceEntry>::downcast(
+            subsystem.getDiscreteVarUpdateValue(s, m_InstanceIx));
+    }
+
+    InstanceEntry& updInstanceEntry(const State& state) const
+    {
+        return Value<InstanceEntry>::updDowncast(
+            getSubsystem().updDiscreteVarUpdateValue(state, m_InstanceIx));
+    }
+
+    const InstanceEntry& getPrevInstanceEntry(const State& state) const
+    {
+        return Value<InstanceEntry>::downcast(
+            getSubsystem().getDiscreteVariable(state, m_InstanceIx));
+    }
+
+    InstanceEntry& updPrevInstanceEntry(State& state) const
+    {
+        return Value<InstanceEntry>::updDowncast(
+            getSubsystem().updDiscreteVariable(state, m_InstanceIx));
+    }
+
+    void assertSurfaceBounds(const Vec3& prevPointS, const Vec3& nextPointS)
+        const;
+
+    void calcTouchdownIfNeeded(
+        const Vec3& prev_QS,
+        const Vec3& next_PS,
+        InstanceEntry& cache) const;
+
+    void calcLiftoffIfNeeded(
+        const Vec3& prev_QS,
+        const Vec3& next_PS,
+        InstanceEntry& cache) const;
+
+    void shootNewGeodesic(
+        Vec3 x,
+        Vec3 t,
+        Real l,
+        Real dsHint,
+        InstanceEntry& cache) const;
+
     // Position level cache: Curve in ground frame.
     struct PosInfo
     {
@@ -262,17 +194,91 @@ public:
         Variation dKP{};
         Variation dKQ{};
 
-        Real length = NaN;
+        SpatialVec unitForce;
     };
 
     // Allocate state variables and cache entries.
-    void realizeTopology(State& state);
-    /* void realizeInstance(const State& state) const; */
-    void realizePosition(const State& state) const;
+    void realizeTopology(State& s)
+    {
+        // Allocate an auto-update discrete variable for the last computed
+        // geodesic.
+        Value<InstanceEntry>* cache = new Value<InstanceEntry>();
 
-    void realizeCablePosition(const State& state) const;
+        cache->upd().length              = 0.;
+        cache->upd().status              = Status::Liftoff;
+        cache->upd().trackingPointOnLine = getInitialPointGuess();
 
-    void invalidatePositionLevelCache(const State& state) const;
+        m_InstanceIx = updSubsystem().allocateAutoUpdateDiscreteVariable(
+            s,
+            Stage::Report,
+            cache,
+            Stage::Position);
+
+        PosInfo posInfo{};
+        m_PosInfoIx = updSubsystem().allocateCacheEntry(
+            s,
+            Stage::Position,
+            Stage::Infinity,
+            new Value<PosInfo>(posInfo));
+    }
+
+    void realizePosition(const State& s, Vec3 prevPointG, Vec3 nextPointG) const
+    {
+        if (getSubsystem().isCacheValueRealized(s, m_PosInfoIx)) {
+            throw std::runtime_error(
+                "expected not realized when calling realizePosition");
+        }
+
+        if (getInstanceEntry(s).status == Status::Disabled) {
+            return;
+        }
+
+        // Compute tramsform from local surface frame to ground.
+        const Transform& X_GS = calcSurfaceFrameInGround(s);
+
+        {
+            // Transform the prev and next path points to the surface frame.
+            const Vec3 prevPointS = X_GS.shiftBaseStationToFrame(prevPointG);
+            const Vec3 nextPointS = X_GS.shiftBaseStationToFrame(nextPointG);
+
+            // Detect liftoff, touchdown and potential invalid configurations.
+            // TODO this doesnt follow the regular invalidation scheme...
+            // Grab the last geodesic that was computed.
+            assertSurfaceBounds(prevPointS, nextPointS);
+
+            calcTouchdownIfNeeded(prevPointS, nextPointS, updInstanceEntry(s));
+            calcLiftoffIfNeeded(prevPointS, nextPointS, updInstanceEntry(s));
+
+            getSubsystem().markDiscreteVarUpdateValueRealized(s, m_InstanceIx);
+        }
+
+        // Transform geodesic in local surface coordinates to ground.
+        {
+            const InstanceEntry& ie = getInstanceEntry(s);
+            PosInfo& ppe            = updPosInfo(s);
+            // Store the the local geodesic in ground frame.
+            ppe.X_GS = X_GS;
+
+            // Store the the local geodesic in ground frame.
+            ppe.KP = X_GS.compose(ie.K_P);
+            ppe.KQ = X_GS.compose(ie.K_Q);
+
+            ppe.dKP[0] = X_GS.R() * ie.dK_P[0];
+            ppe.dKP[1] = X_GS.R() * ie.dK_P[1];
+
+            ppe.dKQ[0] = X_GS.R() * ie.dK_Q[0];
+            ppe.dKQ[1] = X_GS.R() * ie.dK_Q[1];
+        }
+
+        getSubsystem().markCacheValueRealized(s, m_PosInfoIx);
+    }
+
+    void realizeCablePosition(const State& s) const;
+
+    void invalidatePositionLevelCache(const State& state) const
+    {
+        getSubsystem().markCacheValueNotRealized(state, m_PosInfoIx);
+    }
 
     const CableSpan& getCable() const
     {
@@ -291,27 +297,9 @@ public:
 
     const PosInfo& getPosInfo(const State& s) const
     {
-        realizePosition(s);
         return Value<PosInfo>::downcast(
             getSubsystem().getCacheEntry(s, m_PosInfoIx));
     }
-
-    bool isActive(const State& s) const
-    {
-        realizePosition(s);
-        return m_Geodesic.getStatus(s) == Status::Ok;
-    }
-
-    Status getStatus(const State& s) const
-    {
-        return m_Geodesic.getStatus(s);
-    }
-
-    void applyGeodesicCorrection(
-        const State& state,
-        const ContactGeometry::GeodesicCorrection& c) const;
-
-    void calcPathPoints(const State& state, std::vector<Vec3>& points) const;
 
     /* const MobilizedBody& getMobilizedBody() const {return m_Mobod;} */
     void calcContactPointVelocitiesInGround(
@@ -344,13 +332,34 @@ public:
         return m_Mobod.getBodyTransform(s).compose(m_Offset);
     }
 
-    SpatialVec calcAppliedWrenchInGround(const State& s, Real tension) const;
+    SpatialVec calcUnitForceInGround(const State& s) const
+    {
+        const PosInfo& posInfo = getPosInfo(s);
 
-    // TODO Force? or wrench?
+        const UnitVec3& t_P = posInfo.KP.R().getAxisUnitVec(TangentAxis);
+        const UnitVec3& t_Q = posInfo.KQ.R().getAxisUnitVec(TangentAxis);
+        const Vec3 F_G      = t_Q - t_P;
+
+        const Transform& X_GB = m_Mobod.getBodyTransform(s);
+        const Vec3 x_GB       = X_GB.p();
+        const Vec3 r_P        = posInfo.KP.p() - x_GB;
+        const Vec3 r_Q        = posInfo.KQ.p() - x_GB;
+        const Vec3 M_G        = r_Q % t_Q - r_P % t_P;
+
+        return {M_G, F_G};
+    }
+
     void applyBodyForce(
-        const State& state,
+        const State& s,
         Real tension,
-        Vector_<SpatialVec>& bodyForcesInG) const;
+        Vector_<SpatialVec>& bodyForcesInG) const
+    {
+        if (!getInstanceEntry(s).isActive()) {
+            return;
+        }
+
+        m_Mobod.applyBodyForce(s, calcUnitForceInGround(s), bodyForcesInG);
+    }
 
     // TODO allow for user to shoot his own geodesic.
     /* void calcGeodesic(State& state, Vec3 x, Vec3 t, Real l) const; */
@@ -364,7 +373,32 @@ public:
         return *m_Subsystem;
     }
 
-    const DecorativeGeometry& getDecoration() const {return m_Decoration;}
+    const DecorativeGeometry& getDecoration() const
+    {
+        return m_Decoration;
+    }
+
+    Vec3 calcInitialContactPoint(const State& s) const
+    {
+        const InstanceEntry& ic = getInstanceEntry(s);
+        if (!ic.isActive()) {
+            throw std::runtime_error(
+                "Invalid contact point: Curve is not active");
+        }
+        const Vec3& x_PS = ic.K_P.p();
+        return calcSurfaceFrameInGround(s).shiftFrameStationToBase(x_PS);
+    }
+
+    Vec3 calcFinalContactPoint(const State& s) const
+    {
+        const InstanceEntry& ic = getInstanceEntry(s);
+        if (!ic.isActive()) {
+            throw std::runtime_error(
+                "Invalid contact point: Curve is not active");
+        }
+        const Vec3& x_QS = ic.K_Q.p();
+        return calcSurfaceFrameInGround(s).shiftFrameStationToBase(x_QS);
+    }
 
 private:
     PosInfo& updPosInfo(const State& state) const
@@ -373,23 +407,35 @@ private:
             getSubsystem().updCacheEntry(state, m_PosInfoIx));
     }
 
-    void calcPosInfo(const State& state, PosInfo& posInfo) const;
-
     // TODO Required for accessing the cache variable?
     CableSubsystem* m_Subsystem; // The subsystem this segment belongs to.
-    CableSpan m_Path;           // The path this segment belongs to.
-    CurveSegmentIndex m_Index;  // The index in its path.
+    CableSpan m_Path;            // The path this segment belongs to.
+    CurveSegmentIndex m_Index;   // The index in its path.
 
     MobilizedBody m_Mobod;
     Transform m_Offset;
 
-    LocalGeodesic m_Geodesic;
-
     // Decoration TODO should this be here?
-    DecorativeGeometry      m_Decoration;
+    ContactGeometry m_Geometry;
+    DecorativeGeometry m_Decoration;
 
     // TOPOLOGY CACHE
     CacheEntryIndex m_PosInfoIx;
+    DiscreteVariableIndex m_InstanceIx;
+
+    Vec3 m_InitPointGuess{NaN, NaN, NaN};
+
+    size_t m_ProjectionMaxIter = 10;
+    Real m_ProjectionAccuracy  = 1e-10;
+
+    Real m_IntegratorAccuracy = 1e-6;
+
+    Real m_TouchdownAccuracy = 1e-4;
+    size_t m_TouchdownIter   = 10;
+
+    // TODO this must be a function argument such that the caller can
+    // decide,
+    size_t m_NumberOfAnalyticPoints = 10;
 };
 
 //==============================================================================
@@ -472,7 +518,7 @@ public:
     void calcPathPoints(const State& state, std::vector<Vec3>& points) const
     {
         points.push_back(getPosInfo(state).xO);
-        for (const CurveSegment& curve: m_CurveSegments) {
+        for (const CurveSegment& curve : m_CurveSegments) {
             curve.getImpl().calcPathPoints(state, points);
         }
         points.push_back(getPosInfo(state).xI);
@@ -487,9 +533,9 @@ private:
 
     size_t countActive(const State& s) const;
 
-    Vec3 findPrevPoint(const State& state, CurveSegmentIndex ix) const;
+    Vec3 findPrevPoint(const State& state, const CurveSegment& curve) const;
 
-    Vec3 findNextPoint(const State& state, CurveSegmentIndex ix) const;
+    Vec3 findNextPoint(const State& state, const CurveSegment& curve) const;
 
     const CurveSegment* findPrevActiveCurveSegment(
         const State& s,
@@ -559,13 +605,14 @@ private:
 //==============================================================================
 class CableSubsystem::Impl : public Subsystem::Guts
 {
-    public:
+public:
     struct SolverData
     {
-        SolverData(int nActive) {
+        SolverData(int nActive)
+        {
             static constexpr int Q = 4;
             static constexpr int C = 4;
-            const int n = nActive;
+            const int n            = nActive;
 
             lineSegments.resize(n + 1);
             pathErrorJacobian = Matrix(C * n, Q * n, 0.);
@@ -588,10 +635,12 @@ class CableSubsystem::Impl : public Subsystem::Guts
 
     struct CacheEntry
     {
-        CacheEntry() =default;
-        SolverData& updOrInsert(int nActive) {
+        CacheEntry() = default;
+        SolverData& updOrInsert(int nActive)
+        {
             if (nActive <= 0) {
-                throw std::runtime_error("Cannot produce solver data of zero dimension");
+                throw std::runtime_error(
+                    "Cannot produce solver data of zero dimension");
             }
 
             for (int i = m_Data.size(); i < nActive; ++i) {
@@ -668,10 +717,10 @@ class CableSubsystem::Impl : public Subsystem::Guts
     {
         CacheEntry cache{};
         m_CacheIx = allocateCacheEntry(
-                state,
-                Stage::Instance,
-                Stage::Infinity,
-                new Value<CacheEntry>(cache));
+            state,
+            Stage::Instance,
+            Stage::Infinity,
+            new Value<CacheEntry>(cache));
     }
 
     CacheEntry& updCachedScratchboard(const State& state) const
@@ -688,7 +737,10 @@ class CableSubsystem::Impl : public Subsystem::Guts
             return 0;
 
         for (const CableSpan& cable : cables) {
-            int returnValue = cable.getImpl().calcDecorativeGeometryAndAppend(state, stage, decorations);
+            int returnValue = cable.getImpl().calcDecorativeGeometryAndAppend(
+                state,
+                stage,
+                decorations);
             if (returnValue != 0) {
                 return returnValue;
             }
