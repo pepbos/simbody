@@ -1349,30 +1349,39 @@ int CableSpan::Impl::calcDecorativeGeometryAndAppend(
             const Vec3 x_P       = curve.getPosInfo(s).KP.p();
 
             decorations.push_back(DecorativeLine(prevPoint, x_P)
-                                      .setColor(Purple)
-                                      .setLineThickness(3));
+                                      .setColor(Orange)
+                                      .setLineThickness(2));
         }
 
         Transform K_P = curve.getPosInfo(s).KP;
         Transform K_Q = curve.getPosInfo(s).KQ;
-        decorations.push_back(DecorativeLine(
-                                  K_P.p(),
-                                  K_P.p() + K_P.R().getAxisUnitVec(NormalAxis))
-                                  .setColor(Orange)
-                                  .setLineThickness(3));
-        decorations.push_back(DecorativeLine(
-                                  K_Q.p(),
-                                  K_Q.p() + K_Q.R().getAxisUnitVec(NormalAxis))
-                                  .setColor(Blue)
-                                  .setLineThickness(3));
+        const std::array<CoordinateAxis, 3> axes = {
+            TangentAxis,
+            NormalAxis,
+            BinormalAxis};
+        const std::array<Vec3, 3> colors = {
+            Red, Green, Blue};
+
+        for (size_t i = 0; i < 3; ++i) {
+            decorations.push_back(DecorativeLine(
+                        K_P.p(),
+                        K_P.p() + 0.5 * K_P.R().getAxisUnitVec(axes.at(i)))
+                    .setColor(colors.at(i))
+                    .setLineThickness(4));
+            decorations.push_back(DecorativeLine(
+                        K_Q.p(),
+                        K_Q.p() + 0.5 * K_Q.R().getAxisUnitVec(axes.at(i)))
+                    .setColor(colors.at(i))
+                    .setLineThickness(4));
+        }
 
         {
             const Vec3 nextPoint = findNextPoint(s, curveSegment);
             const Vec3 x_Q       = curve.getPosInfo(s).KQ.p();
 
             decorations.push_back(DecorativeLine(nextPoint, x_Q)
-                                      .setColor(Green)
-                                      .setLineThickness(3));
+                                      .setColor(Gray)
+                                      .setLineThickness(2));
         }
 
         curveSegment.getImpl().calcDecorativeGeometryAndAppend(s, decorations);
