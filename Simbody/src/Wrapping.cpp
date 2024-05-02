@@ -1372,6 +1372,8 @@ int CableSpan::Impl::calcDecorativeGeometryAndAppend(
                                       .setColor(Green)
                                       .setLineThickness(3));
         }
+
+        curveSegment.getImpl().calcDecorativeGeometryAndAppend(s, decorations);
     }
 
     /* decorations.push_back(DecorativeLine(lastCurvePoint, ppe.xI) */

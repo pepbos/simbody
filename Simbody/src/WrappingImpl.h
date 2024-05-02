@@ -400,6 +400,22 @@ public:
         return calcSurfaceFrameInGround(s).shiftFrameStationToBase(x_QS);
     }
 
+    void calcDecorativeGeometryAndAppend(
+        const State& s,
+        Array_<DecorativeGeometry>& decorations) const
+    {
+        const InstanceEntry& cache = getInstanceEntry(s);
+        const Transform& X_GS = calcSurfaceFrameInGround(s);
+        Vec3 a = X_GS.shiftFrameStationToBase(cache.K_P.p());
+        for (size_t i = 1; i < cache.samples.size(); ++i) {
+            const Vec3 b = X_GS.shiftFrameStationToBase(cache.samples.at(i).frame.p());
+            decorations.push_back(DecorativeLine(a, b)
+                    .setColor(Purple)
+                    .setLineThickness(3));
+            a = b;
+        }
+    }
+
 private:
     PosInfo& updPosInfo(const State& state) const
     {
