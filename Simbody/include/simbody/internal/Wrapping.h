@@ -57,49 +57,26 @@ public:
 //------------------------------------------------------------------------------
     const CableSpan& getCable() const;
 
-    const ContactGeometry& getContactGeometry() const
-    {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    }
+    const ContactGeometry& getContactGeometry() const;
 
-    const Mobod& getMobilizedBody() const
-    {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    }
-    const Transform& getContactGeometryOffsetFrame(const State& state) const
-    {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    }
+    const Mobod& getMobilizedBody() const;
+
+    const Transform& getContactGeometryOffsetFrame(const State& state) const;
 
 //------------------------------------------------------------------------------
 //                State dependent getters.
 //------------------------------------------------------------------------------
     Real getSegmentLength(const State& state) const;
 
-    const Transform& getFrenetFrameStart(const State& state) const
-    {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    }
+    const Transform& getFrenetFrameStart(const State& state) const;
 
-    const Transform& getFrenetFrameEnd(const State& state) const
-    {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    }
+    const Transform& getFrenetFrameEnd(const State& state) const;
 
-    Status getStatus(const State& state) const
-    {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    }
+    Status getStatus(const State& state) const;
 
-    int getNumberOfIntegratorStepsTaken(const State& state)
-    {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    }
+    int getNumberOfIntegratorStepsTaken(const State& state);
 
-    Real getInitialIntegratorStepSize(const State& state)
-    {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    }
+    Real getInitialIntegratorStepSize(const State& state);
 
     // TODO useful?
     /* void setDisabled(const State& state) const; */
@@ -108,10 +85,7 @@ public:
 //------------------------------------------------------------------------------
 //                State dependent computations.
 //------------------------------------------------------------------------------
-    void calcUnitForce(const State& state, SpatialVec& unitForce_G) const
-    {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    }
+    void calcUnitForce(const State& state, SpatialVec& unitForce_G) const;
 
     // Compute the curve points in ground frame.
     //
@@ -126,20 +100,14 @@ public:
     // If `nPoints=1`, and the curve length is not zero, an exception is thrown.
     //
     // Returns the number of points written.
-    int calcPoints(const State& state, std::vector<Vec3>& points_G, int nPoints = 0)
-    {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    }
+    int calcPoints(const State& state, std::vector<Vec3>& points_G, int nPoints = 0) const;
 
     // Same as `calcPoints` but will write the frenet frames along the curve.
-    int calcFrenetFrames(const State& state, std::vector<ContactGeometry::FrenetFrame>& frames_G, int nPoints = 0)
-    {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    }
+    int calcFrenetFrames(const State& state, std::vector<ContactGeometry::FrenetFrame>& frames_G, int nPoints = 0) const;
 
     bool isActive(const State& state) const
     {
-        getStatus(state) == Status::Ok;
+        return getStatus(state) == Status::Ok;
     }
 
 //------------------------------------------------------------------------------
@@ -229,10 +197,7 @@ public:
 //------------------------------------------------------------------------------
 //                State dependent calculations
 //------------------------------------------------------------------------------
-    Real calcCablePower(const State& state, Real tension) const
-    {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    }
+    Real calcCablePower(const State& state, Real tension) const;
 
     void applyBodyForces(
         const State& state,
@@ -240,10 +205,7 @@ public:
         Vector_<SpatialVec>& bodyForcesInG) const;
 
     // Calls `CurveSegment::calcPoints` on each active curve segment.
-    int calcPoints(const State& state, std::vector<Vec3>& points_G, int nPointsPerCurveSegment = 0)
-    {
-        throw std::runtime_error("NOTYETIMPLEMENTED");
-    }
+    int calcPoints(const State& state, std::vector<Vec3>& points_G, int nPointsPerCurveSegment = 0) const;
 
 //------------------------------------------------------------------------------
 //                TODO TEMPORARY FOR UNIT TESTING
@@ -273,6 +235,7 @@ private:
 
     std::shared_ptr<Impl> m_Impl = nullptr;
 
+    friend CurveSegment;
     friend CurveSegment::Impl;
     friend CableSubsystem;
 };

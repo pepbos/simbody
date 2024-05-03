@@ -23,6 +23,157 @@ using Status              = CurveSegment::Status;
 using Variation           = ContactGeometry::GeodesicVariation;
 
 //==============================================================================
+//                               CURVE SEGMENT
+//==============================================================================
+
+CurveSegment::CurveSegment(
+    CableSpan cable,
+    const MobilizedBody& mobod,
+    Transform X_BS,
+    const ContactGeometry& geometry,
+    Vec3 xHint) :
+    m_Impl(std::shared_ptr<CurveSegment::Impl>(
+        new CurveSegment::Impl(cable, mobod, X_BS, geometry, xHint)))
+{
+    // TODO bit awkward to set the index later.
+    updImpl().setIndex(cable.updImpl().adoptSegment(*this));
+}
+
+const CableSpan& CurveSegment::getCable() const
+{
+    return getImpl().getCable();
+}
+
+Real CurveSegment::getSegmentLength(const State& s) const
+{
+    getImpl().realizeCablePosition(s);
+    return getImpl().getInstanceEntry(s).length;
+}
+
+const ContactGeometry& CurveSegment::getContactGeometry() const
+{
+    throw std::runtime_error("NOTYETIMPLEMENTED");
+}
+
+const Mobod& CurveSegment::getMobilizedBody() const
+{
+    throw std::runtime_error("NOTYETIMPLEMENTED");
+}
+
+const Transform& CurveSegment::getContactGeometryOffsetFrame(const State& state) const
+{
+    throw std::runtime_error("NOTYETIMPLEMENTED");
+}
+
+CurveSegment::Status CurveSegment::getStatus(const State& s) const
+{
+    getImpl().realizeCablePosition(s);
+    return getImpl().getInstanceEntry(s).status;
+}
+
+const Transform& CurveSegment::getFrenetFrameStart(const State& state) const
+{
+    throw std::runtime_error("NOTYETIMPLEMENTED");
+}
+
+const Transform& CurveSegment::getFrenetFrameEnd(const State& state) const
+{
+    throw std::runtime_error("NOTYETIMPLEMENTED");
+}
+
+int CurveSegment::getNumberOfIntegratorStepsTaken(const State& state)
+{
+    throw std::runtime_error("NOTYETIMPLEMENTED");
+}
+
+Real CurveSegment::getInitialIntegratorStepSize(const State& state)
+{
+    throw std::runtime_error("NOTYETIMPLEMENTED");
+}
+void CurveSegment::calcUnitForce(const State& state, SpatialVec& unitForce_G) const
+{
+    throw std::runtime_error("NOTYETIMPLEMENTED");
+}
+
+int CurveSegment::calcPoints(const State& state, std::vector<Vec3>& points_G, int nPoints) const
+{
+    throw std::runtime_error("NOTYETIMPLEMENTED");
+}
+
+// Same as `calcPoints` but will write the frenet frames along the curve.
+int CurveSegment::calcFrenetFrames(const State& state, std::vector<ContactGeometry::FrenetFrame>& frames_G, int nPoints) const
+{
+    throw std::runtime_error("NOTYETIMPLEMENTED");
+}
+
+//==============================================================================
+//                                CABLE SPAN
+//==============================================================================
+
+CableSpan::CableSpan(
+    CableSubsystem& subsystem,
+    const MobilizedBody& originBody,
+    const Vec3& defaultOriginPoint,
+    const MobilizedBody& terminationBody,
+    const Vec3& defaultTerminationPoint) :
+    m_Impl(std::shared_ptr<Impl>(new Impl(
+        subsystem,
+        originBody,
+        defaultOriginPoint,
+        terminationBody,
+        defaultTerminationPoint)))
+{
+    subsystem.updImpl().adoptCablePath(*this);
+}
+
+void CableSpan::adoptWrappingObstacle(
+    const MobilizedBody& mobod,
+    Transform X_BS,
+    const ContactGeometry& geometry,
+    Vec3 contactPointHint)
+{
+    CurveSegment(*this, mobod, X_BS, geometry, contactPointHint);
+}
+
+int CableSpan::getNumCurveSegments() const
+{
+    return getImpl().getNumCurveSegments();
+}
+
+const CurveSegment& CableSpan::getCurveSegment(CurveSegmentIndex ix) const
+{
+    return getImpl().getCurveSegment(ix);
+}
+
+Real CableSpan::getLength(const State& s) const
+{
+    return getImpl().getPosInfo(s).l;
+}
+
+Real CableSpan::getLengthDot(const State& s) const
+{
+    return getImpl().getVelInfo(s).lengthDot;
+}
+
+void CableSpan::applyBodyForces(
+    const State& s,
+    Real tension,
+    Vector_<SpatialVec>& bodyForcesInG) const
+{
+    return getImpl().applyBodyForces(s, tension, bodyForcesInG);
+}
+
+int CableSpan::calcPoints(const State& state, std::vector<Vec3>& points_G, int nPointsPerCurveSegment) const
+{
+    throw std::runtime_error("NOTYETIMPLEMENTED");
+}
+
+Real CableSpan::calcCablePower(const State& state, Real tension) const
+{
+    throw std::runtime_error("NOTYETIMPLEMENTED");
+}
+
+//==============================================================================
 //                                CONSTANTS
 //==============================================================================
 namespace
@@ -722,43 +873,6 @@ void CurveSegment::Impl::shootNewGeodesic(
 }
 
 //==============================================================================
-//                               CURVE SEGMENT
-//==============================================================================
-
-CurveSegment::CurveSegment(
-    CableSpan cable,
-    const MobilizedBody& mobod,
-    Transform X_BS,
-    const ContactGeometry& geometry,
-    Vec3 xHint) :
-    m_Impl(std::shared_ptr<CurveSegment::Impl>(
-        new CurveSegment::Impl(cable, mobod, X_BS, geometry, xHint)))
-{
-    // TODO bit awkward to set the index later.
-    updImpl().setIndex(cable.adoptSegment(*this));
-    /* CurveSegmentIndex ix = cable.adoptSegment(*this); */
-    /* m_Impl = std::shared_ptr<CurveSegment::Impl>(new
-     * CurveSegment::Impl(cable, ix, mobod, X_BS, geometry, xHint)); */
-}
-
-const CableSpan& CurveSegment::getCable() const
-{
-    return getImpl().getCable();
-}
-
-Real CurveSegment::getSegmentLength(const State& s) const
-{
-    getImpl().realizeCablePosition(s);
-    return getImpl().getInstanceEntry(s).length;
-}
-
-CurveSegment::Status CurveSegment::getStatus(const State& s) const
-{
-    getImpl().realizeCablePosition(s);
-    return getImpl().getInstanceEntry(s).status;
-}
-
-//==============================================================================
 //                          CURVE SEGMENT IMPL
 //==============================================================================
 
@@ -821,67 +935,6 @@ void addPathErrorJacobian(
 }
 
 } // namespace
-
-//==============================================================================
-//                                CABLE SPAN
-//==============================================================================
-
-CableSpan::CableSpan(
-    CableSubsystem& subsystem,
-    const MobilizedBody& originBody,
-    const Vec3& defaultOriginPoint,
-    const MobilizedBody& terminationBody,
-    const Vec3& defaultTerminationPoint) :
-    m_Impl(std::shared_ptr<Impl>(new Impl(
-        subsystem,
-        originBody,
-        defaultOriginPoint,
-        terminationBody,
-        defaultTerminationPoint)))
-{
-    subsystem.updImpl().adoptCablePath(*this);
-}
-
-CurveSegmentIndex CableSpan::adoptSegment(const CurveSegment& segment)
-{
-    return updImpl().adoptSegment(segment);
-}
-
-void CableSpan::adoptWrappingObstacle(
-    const MobilizedBody& mobod,
-    Transform X_BS,
-    const ContactGeometry& geometry,
-    Vec3 contactPointHint)
-{
-    CurveSegment(*this, mobod, X_BS, geometry, contactPointHint);
-}
-
-int CableSpan::getNumCurveSegments() const
-{
-    return getImpl().getNumCurveSegments();
-}
-
-const CurveSegment& CableSpan::getCurveSegment(CurveSegmentIndex ix) const
-{
-    return getImpl().getCurveSegment(ix);
-}
-
-Real CableSpan::getLength(const State& s) const
-{
-    return getImpl().getPosInfo(s).l;
-}
-
-Real CableSpan::getLengthDot(const State& s) const
-{
-    return getImpl().getVelInfo(s).lengthDot;
-}
-void CableSpan::applyBodyForces(
-    const State& s,
-    Real tension,
-    Vector_<SpatialVec>& bodyForcesInG) const
-{
-    return getImpl().applyBodyForces(s, tension, bodyForcesInG);
-}
 
 //==============================================================================
 //                              CABLE SPAN IMPL
