@@ -641,7 +641,7 @@ void CurveSegment::Impl::calcLiftoffIfNeeded(
     }
 
     // Liftoff detected: update status.
-    g.status = Status::Liftoff;
+    g.status = Status::Lifted;
     // Initialize the tracking point from the last geodesic start point.
     cache.trackingPointOnLine = g.K_P.p();
 }
@@ -653,7 +653,7 @@ void CurveSegment::Impl::calcTouchdownIfNeeded(
 {
     // Only attempt touchdown when liftoff.
     LocalGeodesicInfo& g = cache;
-    if (g.status != Status::Liftoff) {
+    if (g.status != Status::Lifted) {
         return;
     }
 

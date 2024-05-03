@@ -59,7 +59,7 @@ public:
         double sHint = NaN;
 
         Vec3 trackingPointOnLine{NaN, NaN, NaN};
-        Status status = Status::Liftoff;
+        Status status = Status::Lifted;
     };
 
     // Position level cache: Curve in ground frame.
@@ -105,7 +105,7 @@ public:
         Value<InstanceEntry>* cache = new Value<InstanceEntry>();
 
         cache->upd().length              = 0.;
-        cache->upd().status              = Status::Liftoff;
+        cache->upd().status              = Status::Lifted;
         cache->upd().trackingPointOnLine = getContactPointHint();
 
         m_InstanceIx = updSubsystem().allocateAutoUpdateDiscreteVariable(

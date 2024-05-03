@@ -48,7 +48,7 @@ public:
     enum class Status
     {
         Ok,
-        Liftoff,
+        Lifted,
         Disabled,
     };
 
