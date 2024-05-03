@@ -770,8 +770,8 @@ CurveSegment::Impl::Impl(
     Vec3 initPointGuess) :
     m_Subsystem(&path.updImpl().updSubsystem()),
     m_Path(path), m_Index(-1), // TODO what to do with this index, and when
-    m_Mobod(mobod), m_Offset(X_BS), m_Geometry(geometry),
-    m_InitPointGuess(initPointGuess),
+    m_Mobod(mobod), m_X_BS(X_BS), m_Geometry(geometry),
+    m_ContactPointHintInSurface(initPointGuess),
     m_Decoration(geometry.createDecorativeGeometry()
                      .setColor(Orange)
                      .setOpacity(.75)

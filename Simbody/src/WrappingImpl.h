@@ -94,8 +94,7 @@ public:
         const Vec3 tangent = t + cross(w, t);
 
         // Take the length correction, and add to the current length.
-        const Real dl =
-            c[3]; // Length increment is the last correction element.
+        const Real dl = c[3]; // Length increment is the last element.
         const Real length =
             std::max(cache.length + dl, 0.); // Clamp length to be nonnegative.
 
@@ -179,6 +178,7 @@ public:
                 }
             }
         }
+        // End of unit test code block...
 
         invalidatePositionLevelCache(s);
     }
@@ -200,15 +200,15 @@ public:
 
     // Set the user defined point that controls the initial wrapping path.
     // Point is in surface coordinates.
-    void setInitialPointGuess(Vec3 initPointGuess)
+    void setContactPointHint(Vec3 contactPointHintInSurface)
     {
-        m_InitPointGuess = initPointGuess;
+        m_ContactPointHintInSurface = contactPointHintInSurface;
     }
 
     // Get the user defined point that controls the initial wrapping path.
-    Vec3 getInitialPointGuess() const
+    Vec3 getContactPointHint() const
     {
-        return m_InitPointGuess;
+        return m_ContactPointHintInSurface;
     }
 
     const InstanceEntry& getInstanceEntry(const State& s) const
@@ -283,7 +283,7 @@ public:
 
         cache->upd().length              = 0.;
         cache->upd().status              = Status::Liftoff;
-        cache->upd().trackingPointOnLine = getInitialPointGuess();
+        cache->upd().trackingPointOnLine = getContactPointHint();
 
         m_InstanceIx = updSubsystem().allocateAutoUpdateDiscreteVariable(
             s,
@@ -292,7 +292,7 @@ public:
             Stage::Position);
 
         PosInfo posInfo{};
-        m_PosInfoIx = updSubsystem().allocateCacheEntry(
+        m_PosIx = updSubsystem().allocateCacheEntry(
             s,
             Stage::Position,
             Stage::Infinity,
@@ -301,7 +301,7 @@ public:
 
     void realizePosition(const State& s, Vec3 prevPointG, Vec3 nextPointG) const
     {
-        if (getSubsystem().isCacheValueRealized(s, m_PosInfoIx)) {
+        if (getSubsystem().isCacheValueRealized(s, m_PosIx)) {
             throw std::runtime_error(
                 "expected not realized when calling realizePosition");
         }
@@ -347,14 +347,14 @@ public:
             ppe.dKQ[1] = X_GS.R() * ie.dK_Q[1];
         }
 
-        getSubsystem().markCacheValueRealized(s, m_PosInfoIx);
+        getSubsystem().markCacheValueRealized(s, m_PosIx);
     }
 
     void realizeCablePosition(const State& s) const;
 
     void invalidatePositionLevelCache(const State& state) const
     {
-        getSubsystem().markCacheValueNotRealized(state, m_PosInfoIx);
+        getSubsystem().markCacheValueNotRealized(state, m_PosIx);
     }
 
     const CableSpan& getCable() const
@@ -375,7 +375,7 @@ public:
     const PosInfo& getPosInfo(const State& s) const
     {
         return Value<PosInfo>::downcast(
-            getSubsystem().getCacheEntry(s, m_PosInfoIx));
+            getSubsystem().getCacheEntry(s, m_PosIx));
     }
 
     /* const MobilizedBody& getMobilizedBody() const {return m_Mobod;} */
@@ -406,7 +406,7 @@ public:
 
     Transform calcSurfaceFrameInGround(const State& s) const
     {
-        return m_Mobod.getBodyTransform(s).compose(m_Offset);
+        return m_Mobod.getBodyTransform(s).compose(m_X_BS);
     }
 
     SpatialVec calcUnitForceInGround(const State& s) const
@@ -497,7 +497,7 @@ private:
     PosInfo& updPosInfo(const State& state) const
     {
         return Value<PosInfo>::updDowncast(
-            getSubsystem().updCacheEntry(state, m_PosInfoIx));
+            getSubsystem().updCacheEntry(state, m_PosIx));
     }
 
     // TODO Required for accessing the cache variable?
@@ -505,18 +505,20 @@ private:
     CableSpan m_Path;            // The path this segment belongs to.
     CurveSegmentIndex m_Index;   // The index in its path.
 
+    // MobilizedBody that surface is attached to.
     MobilizedBody m_Mobod;
-    Transform m_Offset;
+    // Surface to body transform.
+    Transform m_X_BS;
 
     // Decoration TODO should this be here?
     ContactGeometry m_Geometry;
     DecorativeGeometry m_Decoration;
 
     // TOPOLOGY CACHE
-    CacheEntryIndex m_PosInfoIx;
+    CacheEntryIndex m_PosIx;
     DiscreteVariableIndex m_InstanceIx;
 
-    Vec3 m_InitPointGuess{NaN, NaN, NaN};
+    Vec3 m_ContactPointHintInSurface{NaN, NaN, NaN};
 
     size_t m_ProjectionMaxIter = 10;
     Real m_ProjectionAccuracy  = 1e-10;
@@ -525,10 +527,6 @@ private:
 
     Real m_TouchdownAccuracy = 1e-4;
     size_t m_TouchdownIter   = 10;
-
-    // TODO this must be a function argument such that the caller can
-    // decide,
-    size_t m_NumberOfAnalyticPoints = 10;
 };
 
 //==============================================================================
