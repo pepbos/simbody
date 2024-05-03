@@ -247,20 +247,7 @@ public:
         return m_Mobod.getBodyTransform(s).compose(m_X_BS);
     }
 
-    // Compute the path points of the current geodesic, and write them to
-    // the buffer. These points are in local surface coordinates. Returns
-    // the number of points written.
-    void calcPathPoints(const State& s, std::vector<Vec3>& points) const
-    {
-        const Transform& X_GS           = getPosInfo(s).X_GS;
-        const InstanceEntry& geodesic_S = getInstanceEntry(s);
-        if (!geodesic_S.isActive()) {
-            return;
-        }
-        for (const LocalGeodesicSample& sample : geodesic_S.samples) {
-            points.push_back(X_GS.shiftFrameStationToBase(sample.frame.p()));
-        }
-    }
+    int calcPathPoints(const State& s, std::vector<Vec3>& points, int nSamples=0) const;
 
     void calcUnitForce(const State& s, SpatialVec& unitForce_G) const
     {

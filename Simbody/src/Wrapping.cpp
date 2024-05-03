@@ -734,7 +734,137 @@ void calcGeodesicAndVariationImplicitly(
 } // namespace
 
 //==============================================================================
-//                                SOLVER
+//                                Resampling geodesic
+//==============================================================================
+
+namespace
+{
+    Vec3 calcHermiteInterpolation(Real x0, const Vec3& y0, const Vec3& y0Dot, Real x1, const Vec3& y1, const Vec3& y1Dot, Real x)
+    {
+        const Real dx = x1 - x0;
+        const Vec3 dy = y1 - y0;
+        const Vec3 dyDot = y1Dot - y0Dot;
+
+        const Vec3& c0 = y0;
+        const Vec3& c1 = y0Dot;
+        const Vec3 c3 =
+            -2. * (dy - y0Dot * dx - 0.5 * dx * dyDot) / std::pow(dx, 3);
+        const Vec3 c2 = (dyDot / dx - 3. * c3 * dx) / 2.;
+
+        const Real h = x - x0;
+        return c0 + h * (c1 + h * (c2 + h * c3));
+    }
+
+    Vec3 calcHermiteInterpolation(const LocalGeodesicSample& a, const LocalGeodesicSample& b, Real l)
+    {
+        return calcHermiteInterpolation(
+                a.length, a.frame.p(), a.frame.R().getAxisUnitVec(TangentAxis),
+                b.length, b.frame.p(), b.frame.R().getAxisUnitVec(TangentAxis),
+                l);
+    }
+
+    size_t calcResampledGeodesicPoints(const std::vector<LocalGeodesicSample>& geodesic, const Transform& X_GS, int nSamples, std::vector<Vec3>& interpolatedSamples)
+    {
+        // Some sanity checks.
+        if (geodesic.empty()) {
+            throw std::runtime_error("Resampling of geodesic failed: Provided geodesic is empty.");
+        }
+        if (geodesic.front().length != 0.) {
+            throw std::runtime_error("Resampling of geodesic failed: First frame must be at length = zero");
+        }
+        if (geodesic.front().length < 0.) {
+            throw std::runtime_error("Resampling of geodesic failed: Last frame must be at length > zero");
+        }
+        if (nSamples == 1 && geodesic.size() != 1) {
+            throw std::runtime_error("Resampling of geodesic failed: Requested number of samples must be unequal to 1");
+        }
+
+        // Capture the start of the geodesic.
+        interpolatedSamples.push_back(
+                X_GS.shiftFrameStationToBase(geodesic.front().frame.p()));
+
+        // If there is but one sample in the geodesic, write that sample and exit.
+        if (geodesic.size() == 1) {
+            return 1;
+        }
+
+        // Seperate the interpolation points by equal length increments.
+        const Real dl = geodesic.back().length / static_cast<Real>(nSamples - 1);
+
+        // Compute the interpolated points from the geodesic.
+        auto itGeodesic = geodesic.begin();
+        // We can skip the first and last samples, because these are pushed
+        // manually before and after this loop respectively (we start at i=1
+        // and stop at i < nSamples-1).
+        for (size_t i = 1; i < nSamples-1; ++i) {
+
+            // Length at the current interpolation point.
+            const Real length = dl * static_cast<Real>(i);
+
+            // Find the two samples (lhs, rhs) of the geodesic such that the
+            // length of the interpolation point lies between them.
+            // i.e. find: lhs.length <= length < rhs.length
+            while(true) {
+                // Sanity check: We should stay within range.
+                if ((itGeodesic + 1) == geodesic.end()) {
+                    throw std::runtime_error("Resampling of geodesic failed: Attempted to read out of array range");
+                }
+
+                // The candidate samples to use for interpolation.
+                const LocalGeodesicSample& lhs = *itGeodesic;
+                const LocalGeodesicSample& rhs = *(itGeodesic + 1);
+
+                // Sanity check: Samples are assumed to be monotonically increasing in length.
+                if (lhs.length > rhs.length) {
+                    throw std::runtime_error("Resampling of geodesic failed: Samples are not monotonically increasing in length.");
+                }
+
+                // Check that the interpolation point lies between these samples: lhs.length <= length < rhs.length
+                if (length >= rhs.length) {
+                    // Try the next two samples.
+                    ++itGeodesic;
+                    continue;
+                }
+
+                // Do the interpolation, and write to the output buffer.
+                const Vec3 point_S = calcHermiteInterpolation(lhs, rhs, length);
+                // Transform to ground frame.
+                const Vec3 point_G  = X_GS.shiftFrameStationToBase(point_S);
+                // Write interpolated point to the output buffer.
+                interpolatedSamples.push_back(point_G);
+
+                break;
+            }
+        }
+
+        // Capture the last point of the geodesic.
+        interpolatedSamples.push_back(X_GS.shiftFrameStationToBase(geodesic.back().frame.p()));
+
+        return nSamples;
+    }
+}
+
+int CurveSegment::Impl::calcPathPoints(const State& s, std::vector<Vec3>& points, int nSamples) const
+{
+    const Transform& X_GS           = getPosInfo(s).X_GS;
+    const InstanceEntry& geodesic_S = getInstanceEntry(s);
+    if (!geodesic_S.isActive()) {
+        return 0;
+    }
+
+    // Do not do any resampling if nSamples==0, simply write the points from the integrator to the output buffer.
+    if (nSamples == 0) {
+        for (const LocalGeodesicSample& sample : geodesic_S.samples) {
+            points.push_back(X_GS.shiftFrameStationToBase(sample.frame.p()));
+        }
+    }
+
+    // Resample the points from the integrator by interpolating at equal intervals.
+    return calcResampledGeodesicPoints(geodesic_S.samples, X_GS, nSamples, points);
+}
+
+//==============================================================================
+//                                ???
 //==============================================================================
 
 namespace
