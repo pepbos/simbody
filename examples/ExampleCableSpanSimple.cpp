@@ -44,11 +44,7 @@ int testJacobian(
             } else {
                 os << "PASSED Perturbation test " << i << "\n";
             }
-            os << "    d     = " << d << "\n";
             os << "    q1    = " << q1 << "\n";
-            os << "    J     = " << J0 << "\n";
-            os << "    y0    = " << y0 << "\n";
-            os << "    y1    = " << y1 << "\n";
             os << "    dy    = " << dy << "\n";
             os << "    dyExp = " << dyExpected << "\n";
             os << "    e     = " << e << ".norm() = " << e.norm() << "\n";

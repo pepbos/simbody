@@ -20,25 +20,16 @@ namespace SimTK
 //==============================================================================
 class CurveSegment::Impl
 {
+
+//------------------------------------------------------------------------------
+//                        Some public types and aliases
+//------------------------------------------------------------------------------
 public:
     using FrenetFrame = ContactGeometry::FrenetFrame;
     using Variation   = ContactGeometry::GeodesicVariation;
     using Correction  = ContactGeometry::GeodesicCorrection;
 
-public:
-    Impl()                              = delete;
-    Impl(const Impl& source)            = delete;
-    Impl& operator=(const Impl& source) = delete;
-    ~Impl()                             = default;
-
-    // TODO you would expect the constructor to take the index as well here?
-    Impl(
-        CableSpan path,
-        const MobilizedBody& mobod,
-        const Transform& X_BS,
-        ContactGeometry geometry,
-        Vec3 initPointGuess);
-
+    // Instance level cache entry.
     struct LocalGeodesicSample
     {
         LocalGeodesicSample(Real l, FrenetFrame K) : length(l), frame(K)
@@ -48,6 +39,7 @@ public:
         FrenetFrame frame;
     };
 
+    // Instance level cache entry.
     struct InstanceEntry
     {
         bool isActive() const
@@ -69,6 +61,21 @@ public:
         Vec3 trackingPointOnLine{NaN, NaN, NaN};
         Status status = Status::Liftoff;
     };
+//------------------------------------------------------------------------------
+
+public:
+    Impl()                              = delete;
+    Impl(const Impl& source)            = delete;
+    Impl& operator=(const Impl& source) = delete;
+    ~Impl()                             = default;
+
+    // TODO you would expect the constructor to take the index as well here?
+    Impl(
+        CableSpan path,
+        const MobilizedBody& mobod,
+        const Transform& X_BS,
+        ContactGeometry geometry,
+        Vec3 initPointGuess);
 
     // Apply the correction to the initial condition of the geodesic, and
     // shoot a new geodesic, updating the cache variable.
@@ -79,11 +86,12 @@ public:
         const Variation& dK_P      = cache.dK_P;
         const FrenetFrame& K_P     = cache.K_P;
 
-        // TODO Frames and Variations stored below should be part of a unti test...
+        // TODO This is part of the unit test block below...
         const FrenetFrame K0_P = cache.K_P;
         const FrenetFrame K0_Q = cache.K_Q;
         const Variation dK0_P  = cache.dK_P;
         const Variation dK0_Q  = cache.dK_Q;
+        // TODO end of part belongning to unit test below..
 
         // Get corrected initial conditions.
         const Vec3 v     = dK_P[1] * c;
