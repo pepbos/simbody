@@ -61,7 +61,8 @@ public:
 
     const Mobod& getMobilizedBody() const;
 
-    const Transform& getContactGeometryOffsetFrame(const State& state) const;
+    const Transform& getXformSurfaceToBody() const;
+    void setXformSurfaceToBody(Transform X_BS);
 
 //------------------------------------------------------------------------------
 //                State dependent getters.
@@ -101,9 +102,6 @@ public:
     //
     // Returns the number of points written.
     int calcPoints(const State& state, std::vector<Vec3>& points_G, int nPoints = 0) const;
-
-    // Same as `calcPoints` but will write the frenet frames along the curve.
-    int calcFrenetFrames(const State& state, std::vector<ContactGeometry::FrenetFrame>& frames_G, int nPoints = 0) const;
 
     bool isActive(const State& state) const
     {

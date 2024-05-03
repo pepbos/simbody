@@ -215,12 +215,17 @@ public:
         return m_ContactPointHint_S;
     }
 
-    const MobilizedBody& getMobilizedBody() const {return m_Mobod;}
-
-    CableSubsystem& updSubsystem() { return *m_Subsystem; }
-    const CableSubsystem& getSubsystem() const { return *m_Subsystem; }
+    const ContactGeometry& getContactGeometry() const {return m_Geometry;}
 
     const DecorativeGeometry& getDecoration() const { return m_Decoration; }
+
+    const MobilizedBody& getMobilizedBody() const {return m_Mobod;}
+
+    const Transform& getXformSurfaceToBody() const {return m_X_BS;}
+    void setXformSurfaceToBody(Transform X_BS) {m_X_BS = std::move(X_BS);}
+
+    const CableSubsystem& getSubsystem() const { return *m_Subsystem; }
+    CableSubsystem& updSubsystem() { return *m_Subsystem; }
 
 //------------------------------------------------------------------------------
 //                         Cache entry access
@@ -247,7 +252,7 @@ public:
         return m_Mobod.getBodyTransform(s).compose(m_X_BS);
     }
 
-    int calcPathPoints(const State& s, std::vector<Vec3>& points, int nSamples=0) const;
+    int calcPathPoints(const State& s, std::vector<Vec3>& points, int nSamples) const;
 
     void calcUnitForce(const State& s, SpatialVec& unitForce_G) const
     {
@@ -580,13 +585,23 @@ public:
         Stage stage,
         Array_<DecorativeGeometry>& decorations) const;
 
-    void calcPathPoints(const State& state, std::vector<Vec3>& points) const
+    int calcPathPoints(const State& state, std::vector<Vec3>& points_G, int nPointsPerCurveSegment) const
     {
-        points.push_back(getPosInfo(state).xO);
+        // Write the initial point.
+        const PosInfo& pos = getPosInfo(state);
+        points_G.push_back(pos.xO);
+
+        // Write points along each of the curves.
+        int count = 0; // Count number of points written.
         for (const CurveSegment& curve : m_CurveSegments) {
-            curve.getImpl().calcPathPoints(state, points);
+            count += curve.getImpl().calcPathPoints(state, points_G, nPointsPerCurveSegment);
         }
-        points.push_back(getPosInfo(state).xI);
+
+        // Write the termination point.
+        points_G.push_back(pos.xI);
+
+        // Return number of points written.
+        return count + 2;
     }
 
     void calcPathErrorJacobianUtility(

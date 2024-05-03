@@ -52,17 +52,22 @@ Real CurveSegment::getSegmentLength(const State& s) const
 
 const ContactGeometry& CurveSegment::getContactGeometry() const
 {
-    throw std::runtime_error("NOTYETIMPLEMENTED");
+    return getImpl().getContactGeometry();
 }
 
 const Mobod& CurveSegment::getMobilizedBody() const
 {
-    throw std::runtime_error("NOTYETIMPLEMENTED");
+    return getImpl().getMobilizedBody();
 }
 
-const Transform& CurveSegment::getContactGeometryOffsetFrame(const State& state) const
+void CurveSegment::setXformSurfaceToBody(Transform X_BS)
 {
-    throw std::runtime_error("NOTYETIMPLEMENTED");
+    updImpl().setXformSurfaceToBody(std::move(X_BS));
+}
+
+const Transform& CurveSegment::getXformSurfaceToBody() const
+{
+    return getImpl().getXformSurfaceToBody();
 }
 
 CurveSegment::Status CurveSegment::getStatus(const State& s) const
@@ -73,37 +78,38 @@ CurveSegment::Status CurveSegment::getStatus(const State& s) const
 
 const Transform& CurveSegment::getFrenetFrameStart(const State& state) const
 {
-    throw std::runtime_error("NOTYETIMPLEMENTED");
+    getImpl().realizeCablePosition(state);
+    return getImpl().getPosInfo(state).KP;
 }
 
 const Transform& CurveSegment::getFrenetFrameEnd(const State& state) const
 {
-    throw std::runtime_error("NOTYETIMPLEMENTED");
+    getImpl().realizeCablePosition(state);
+    return getImpl().getPosInfo(state).KQ;
 }
 
 int CurveSegment::getNumberOfIntegratorStepsTaken(const State& state)
 {
-    throw std::runtime_error("NOTYETIMPLEMENTED");
+    getImpl().realizeCablePosition(state);
+    return getImpl().getInstanceEntry(state).samples.size();
 }
 
 Real CurveSegment::getInitialIntegratorStepSize(const State& state)
 {
+    getImpl().realizeCablePosition(state);
     throw std::runtime_error("NOTYETIMPLEMENTED");
 }
+
 void CurveSegment::calcUnitForce(const State& state, SpatialVec& unitForce_G) const
 {
-    throw std::runtime_error("NOTYETIMPLEMENTED");
+    getImpl().realizeCablePosition(state);
+    getImpl().calcUnitForce(state, unitForce_G);
 }
 
 int CurveSegment::calcPoints(const State& state, std::vector<Vec3>& points_G, int nPoints) const
 {
-    throw std::runtime_error("NOTYETIMPLEMENTED");
-}
-
-// Same as `calcPoints` but will write the frenet frames along the curve.
-int CurveSegment::calcFrenetFrames(const State& state, std::vector<ContactGeometry::FrenetFrame>& frames_G, int nPoints) const
-{
-    throw std::runtime_error("NOTYETIMPLEMENTED");
+    getImpl().realizeCablePosition(state);
+    return getImpl().calcPathPoints(state, points_G, nPoints);
 }
 
 //==============================================================================
@@ -165,7 +171,7 @@ void CableSpan::applyBodyForces(
 
 int CableSpan::calcPoints(const State& state, std::vector<Vec3>& points_G, int nPointsPerCurveSegment) const
 {
-    throw std::runtime_error("NOTYETIMPLEMENTED");
+    return getImpl().calcPathPoints(state, points_G, nPointsPerCurveSegment);
 }
 
 Real CableSpan::calcCablePower(const State& state, Real tension) const
@@ -1493,8 +1499,8 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         // Evaluate path error, and stop when converged.
         calcPathErrorVector<2>(s, data.lineSegments, axes, data.pathError);
         const Real maxPathError = data.pathError.normInf();
-        std::cout << " max = " << maxPathError << "\n";
-        if (maxPathError < m_PathErrorBound || (posInfo.loopIter + 1) >= m_PathMaxIter) {
+        if (maxPathError < m_PathErrorBound ||
+            (posInfo.loopIter + 1) >= m_PathMaxIter) {
             posInfo.l = 0.;
             for (const LineSegment& line : data.lineSegments) {
                 posInfo.l += line.l;
@@ -1592,6 +1598,7 @@ void CableSpan::Impl::applyBodyForces(
     Real tension,
     Vector_<SpatialVec>& bodyForcesInG) const
 {
+    realizePosition(s);
     if (tension < 0.) {
         throw std::runtime_error("Cable tension can not go below zero.");
     }
