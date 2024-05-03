@@ -617,8 +617,8 @@ const Correction* calcPathCorrections(SolverData& data)
 //==============================================================================
 
 void CurveSegment::Impl::calcLiftoffIfNeeded(
-    const Vec3& prev_QS,
-    const Vec3& next_PS,
+    const Vec3& prevPoint_S,
+    const Vec3& nextPoint_S,
     CurveSegment::Impl::InstanceEntry& cache) const
 {
     // Only attempt liftoff when currently wrapping the surface.
@@ -634,8 +634,8 @@ void CurveSegment::Impl::calcLiftoffIfNeeded(
 
     // For a zero-length curve, trigger liftoff when the prev and next points
     // lie above the surface plane.
-    if (dot(prev_QS - g.K_P.p(), g.K_P.R().getAxisUnitVec(NormalAxis)) <= 0. ||
-        dot(next_PS - g.K_P.p(), g.K_P.R().getAxisUnitVec(NormalAxis)) <= 0.) {
+    if (dot(prevPoint_S - g.K_P.p(), g.K_P.R().getAxisUnitVec(NormalAxis)) <= 0. ||
+        dot(nextPoint_S - g.K_P.p(), g.K_P.R().getAxisUnitVec(NormalAxis)) <= 0.) {
         // No liftoff.
         return;
     }
@@ -647,8 +647,8 @@ void CurveSegment::Impl::calcLiftoffIfNeeded(
 }
 
 void CurveSegment::Impl::calcTouchdownIfNeeded(
-    const Vec3& prev_QS,
-    const Vec3& next_PS,
+    const Vec3& prevPoint_S,
+    const Vec3& nextPoint_S,
     CurveSegment::Impl::InstanceEntry& cache) const
 {
     // Only attempt touchdown when liftoff.
@@ -661,8 +661,8 @@ void CurveSegment::Impl::calcTouchdownIfNeeded(
     // that is nearest to the surface.
     const bool touchdownDetected = calcNearestPointOnLineImplicitly(
         m_Geometry,
-        prev_QS,
-        next_PS,
+        prevPoint_S,
+        nextPoint_S,
         cache.trackingPointOnLine,
         m_TouchdownIter,
         m_TouchdownAccuracy);
@@ -675,22 +675,22 @@ void CurveSegment::Impl::calcTouchdownIfNeeded(
     // Shoot a zero length geodesic at the touchdown point.
     shootNewGeodesic(
         cache.trackingPointOnLine,
-        next_PS - prev_QS,
+        nextPoint_S - prevPoint_S,
         0.,
         cache.sHint,
         cache);
 }
 
 void CurveSegment::Impl::assertSurfaceBounds(
-    const Vec3& prev_QS,
-    const Vec3& next_PS) const
+    const Vec3& prevPoint_S,
+    const Vec3& nextPoint_S) const
 {
     // Make sure that the previous point does not lie inside the surface.
-    if (calcSurfaceConstraintValue(m_Geometry, prev_QS) < 0.) {
+    if (calcSurfaceConstraintValue(m_Geometry, prevPoint_S) < 0.) {
         throw std::runtime_error("Unable to wrap over surface: Preceding point "
                                  "lies inside the surface");
     }
-    if (calcSurfaceConstraintValue(m_Geometry, next_PS) < 0.) {
+    if (calcSurfaceConstraintValue(m_Geometry, nextPoint_S) < 0.) {
         throw std::runtime_error(
             "Unable to wrap over surface: Next point lies inside the surface");
     }
@@ -700,7 +700,7 @@ void CurveSegment::Impl::shootNewGeodesic(
     Vec3 x,
     Vec3 t,
     Real l,
-    Real dsHint,
+    Real sHint,
     InstanceEntry& cache) const
 {
     cache.samples.clear();
@@ -709,7 +709,7 @@ void CurveSegment::Impl::shootNewGeodesic(
         x,
         t,
         l,
-        cache.sHint,
+        sHint,
         cache.K_P,
         cache.dK_P,
         cache.K_Q,
@@ -771,7 +771,7 @@ CurveSegment::Impl::Impl(
     m_Subsystem(&path.updImpl().updSubsystem()),
     m_Path(path), m_Index(-1), // TODO what to do with this index, and when
     m_Mobod(mobod), m_X_BS(X_BS), m_Geometry(geometry),
-    m_ContactPointHintInSurface(initPointGuess),
+    m_ContactPointHint_S(initPointGuess),
     m_Decoration(geometry.createDecorativeGeometry()
                      .setColor(Orange)
                      .setOpacity(.75)

@@ -200,15 +200,15 @@ public:
 
     // Set the user defined point that controls the initial wrapping path.
     // Point is in surface coordinates.
-    void setContactPointHint(Vec3 contactPointHintInSurface)
+    void setContactPointHint(Vec3 contactPointHint_S)
     {
-        m_ContactPointHintInSurface = contactPointHintInSurface;
+        m_ContactPointHint_S = contactPointHint_S;
     }
 
     // Get the user defined point that controls the initial wrapping path.
     Vec3 getContactPointHint() const
     {
-        return m_ContactPointHintInSurface;
+        return m_ContactPointHint_S;
     }
 
     const InstanceEntry& getInstanceEntry(const State& s) const
@@ -239,26 +239,6 @@ public:
         return Value<InstanceEntry>::updDowncast(
             getSubsystem().updDiscreteVariable(state, m_InstanceIx));
     }
-
-    void assertSurfaceBounds(const Vec3& prevPointS, const Vec3& nextPointS)
-        const;
-
-    void calcTouchdownIfNeeded(
-        const Vec3& prev_QS,
-        const Vec3& next_PS,
-        InstanceEntry& cache) const;
-
-    void calcLiftoffIfNeeded(
-        const Vec3& prev_QS,
-        const Vec3& next_PS,
-        InstanceEntry& cache) const;
-
-    void shootNewGeodesic(
-        Vec3 x,
-        Vec3 t,
-        Real l,
-        Real dsHint,
-        InstanceEntry& cache) const;
 
     // Position level cache: Curve in ground frame.
     struct PosInfo
@@ -315,16 +295,16 @@ public:
 
         {
             // Transform the prev and next path points to the surface frame.
-            const Vec3 prevPointS = X_GS.shiftBaseStationToFrame(prevPointG);
-            const Vec3 nextPointS = X_GS.shiftBaseStationToFrame(nextPointG);
+            const Vec3 prevPoint_S = X_GS.shiftBaseStationToFrame(prevPointG);
+            const Vec3 nextPoint_S = X_GS.shiftBaseStationToFrame(nextPointG);
 
             // Detect liftoff, touchdown and potential invalid configurations.
             // TODO this doesnt follow the regular invalidation scheme...
             // Grab the last geodesic that was computed.
-            assertSurfaceBounds(prevPointS, nextPointS);
+            assertSurfaceBounds(prevPoint_S, nextPoint_S);
 
-            calcTouchdownIfNeeded(prevPointS, nextPointS, updInstanceEntry(s));
-            calcLiftoffIfNeeded(prevPointS, nextPointS, updInstanceEntry(s));
+            calcTouchdownIfNeeded(prevPoint_S, nextPoint_S, updInstanceEntry(s));
+            calcLiftoffIfNeeded(prevPoint_S, nextPoint_S, updInstanceEntry(s));
 
             getSubsystem().markDiscreteVarUpdateValueRealized(s, m_InstanceIx);
         }
@@ -500,6 +480,34 @@ private:
             getSubsystem().updCacheEntry(state, m_PosIx));
     }
 
+//------------------------------------------------------------------------------
+//                          Local geodesic helpers
+//------------------------------------------------------------------------------
+    // Assert that previous and next point lie above the surface. Points are in
+    // surface coordinates.
+    void assertSurfaceBounds(const Vec3& prevPoint_S, const Vec3& nextPoint_S)
+        const;
+
+    // Attempt to compute the point of touchdown on the surface.
+    void calcTouchdownIfNeeded(
+        const Vec3& prevPoint_S,
+        const Vec3& nextPoint_S,
+        InstanceEntry& cache) const;
+
+    void calcLiftoffIfNeeded(
+        const Vec3& prevPoint_S,
+        const Vec3& nextPoint_S,
+        InstanceEntry& cache) const;
+
+    // Compute a new geodesic in surface frame coordinates.
+    void shootNewGeodesic(
+        Vec3 point_S,
+        Vec3 tangent_S,
+        Real length,
+        Real stepSizeHint,
+        InstanceEntry& cache) const;
+//------------------------------------------------------------------------------
+
     // TODO Required for accessing the cache variable?
     CableSubsystem* m_Subsystem; // The subsystem this segment belongs to.
     CableSpan m_Path;            // The path this segment belongs to.
@@ -518,12 +526,12 @@ private:
     CacheEntryIndex m_PosIx;
     DiscreteVariableIndex m_InstanceIx;
 
-    Vec3 m_ContactPointHintInSurface{NaN, NaN, NaN};
+    Vec3 m_ContactPointHint_S{NaN, NaN, NaN};
 
     size_t m_ProjectionMaxIter = 10;
     Real m_ProjectionAccuracy  = 1e-10;
 
-    Real m_IntegratorAccuracy = 1e-6;
+    Real m_IntegratorAccuracy = 1e-8;
 
     Real m_TouchdownAccuracy = 1e-4;
     size_t m_TouchdownIter   = 10;
