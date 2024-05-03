@@ -61,13 +61,30 @@ public:
         Vec3 trackingPointOnLine{NaN, NaN, NaN};
         Status status = Status::Liftoff;
     };
+
+    // Position level cache: Curve in ground frame.
+    struct PosInfo
+    {
+        Transform X_GS{};
+
+        FrenetFrame KP{};
+        FrenetFrame KQ{};
+
+        Variation dKP{};
+        Variation dKQ{};
+
+        SpatialVec unitForce;
+    };
 //------------------------------------------------------------------------------
 
 public:
-    Impl()                              = delete;
-    Impl(const Impl& source)            = delete;
-    Impl& operator=(const Impl& source) = delete;
-    ~Impl()                             = default;
+    Impl()                           = delete;
+    Impl(const Impl&)                = delete;
+    Impl& operator=(const Impl&)     = delete;
+
+    ~Impl()                          = default;
+    Impl(Impl&&) noexcept            = default;
+    Impl& operator=(Impl&&) noexcept = default;
 
     // TODO you would expect the constructor to take the index as well here?
     Impl(
@@ -76,6 +93,160 @@ public:
         const Transform& X_BS,
         ContactGeometry geometry,
         Vec3 initPointGuess);
+
+//------------------------------------------------------------------------------
+//                          Stage realizations
+//------------------------------------------------------------------------------
+    // Allocate state variables and cache entries.
+    void realizeTopology(State& s)
+    {
+        // Allocate an auto-update discrete variable for the last computed
+        // geodesic.
+        Value<InstanceEntry>* cache = new Value<InstanceEntry>();
+
+        cache->upd().length              = 0.;
+        cache->upd().status              = Status::Liftoff;
+        cache->upd().trackingPointOnLine = getContactPointHint();
+
+        m_InstanceIx = updSubsystem().allocateAutoUpdateDiscreteVariable(
+            s,
+            Stage::Report,
+            cache,
+            Stage::Position);
+
+        PosInfo posInfo{};
+        m_PosIx = updSubsystem().allocateCacheEntry(
+            s,
+            Stage::Position,
+            Stage::Infinity,
+            new Value<PosInfo>(posInfo));
+    }
+
+    void realizePosition(const State& s, Vec3 prevPointG, Vec3 nextPointG) const
+    {
+        if (getSubsystem().isCacheValueRealized(s, m_PosIx)) {
+            throw std::runtime_error(
+                "expected not realized when calling realizePosition");
+        }
+
+        if (getInstanceEntry(s).status == Status::Disabled) {
+            return;
+        }
+
+        // Compute tramsform from local surface frame to ground.
+        const Transform& X_GS = calcSurfaceFrameInGround(s);
+
+        {
+            // Transform the prev and next path points to the surface frame.
+            const Vec3 prevPoint_S = X_GS.shiftBaseStationToFrame(prevPointG);
+            const Vec3 nextPoint_S = X_GS.shiftBaseStationToFrame(nextPointG);
+
+            // Detect liftoff, touchdown and potential invalid configurations.
+            // TODO this doesnt follow the regular invalidation scheme...
+            // Grab the last geodesic that was computed.
+            assertSurfaceBounds(prevPoint_S, nextPoint_S);
+
+            calcTouchdownIfNeeded(prevPoint_S, nextPoint_S, updInstanceEntry(s));
+            calcLiftoffIfNeeded(prevPoint_S, nextPoint_S, updInstanceEntry(s));
+
+            getSubsystem().markDiscreteVarUpdateValueRealized(s, m_InstanceIx);
+        }
+
+        // At this point we have a valid geodesic in surface frame.
+        const InstanceEntry& ie = getInstanceEntry(s);
+
+        // Start updating the position level cache.
+        PosInfo& pos            = updPosInfo(s);
+
+        // Transform geodesic in local surface coordinates to ground.
+        {
+            // Store the local geodesic in ground frame.
+            pos.X_GS = X_GS;
+
+            // Store the the local geodesic in ground frame.
+            pos.KP = X_GS.compose(ie.K_P);
+            pos.KQ = X_GS.compose(ie.K_Q);
+
+            pos.dKP[0] = X_GS.R() * ie.dK_P[0];
+            pos.dKP[1] = X_GS.R() * ie.dK_P[1];
+
+            pos.dKQ[0] = X_GS.R() * ie.dK_Q[0];
+            pos.dKQ[1] = X_GS.R() * ie.dK_Q[1];
+        }
+
+        // Compute the unit force and moment in ground frame.
+        {
+            const UnitVec3& t_P = pos.KP.R().getAxisUnitVec(TangentAxis);
+            const UnitVec3& t_Q = pos.KQ.R().getAxisUnitVec(TangentAxis);
+            const Vec3 F_G      = t_Q - t_P;
+
+            const Vec3 x_GB       = m_Mobod.getBodyOriginLocation(s);
+            const Vec3 r_P        = pos.KP.p() - x_GB;
+            const Vec3 r_Q        = pos.KQ.p() - x_GB;
+            const Vec3 M_G        = r_Q % t_Q - r_P % t_P;
+            pos.F_G{M_G, F_G};
+        }
+
+        getSubsystem().markCacheValueRealized(s, m_PosIx);
+    }
+
+    void realizeCablePosition(const State& s) const;
+
+    void invalidatePositionLevelCache(const State& state) const
+    {
+        getSubsystem().markCacheValueNotRealized(state, m_PosIx);
+    }
+
+//------------------------------------------------------------------------------
+//                  Parameter & model components access
+//------------------------------------------------------------------------------
+    const CableSpan& getCable() const
+    {
+        return m_Path;
+    }
+
+    CurveSegmentIndex getIndex() const
+    {
+        return m_Index;
+    }
+
+    void setIndex(CurveSegmentIndex ix)
+    {
+        m_Index = ix;
+    }
+
+    // Set the user defined point that controls the initial wrapping path.
+    // Point is in surface coordinates.
+    void setContactPointHint(Vec3 contactPointHint_S)
+    {
+        m_ContactPointHint_S = contactPointHint_S;
+    }
+
+    // Get the user defined point that controls the initial wrapping path.
+    Vec3 getContactPointHint() const
+    {
+        return m_ContactPointHint_S;
+    }
+
+//------------------------------------------------------------------------------
+//                         Cache entry access
+//------------------------------------------------------------------------------
+    const InstanceEntry& getInstanceEntry(const State& s) const
+    {
+        const CableSubsystem& subsystem = getSubsystem();
+        if (!subsystem.isDiscreteVarUpdateValueRealized(s, m_InstanceIx)) {
+            updInstanceEntry(s) = getPrevInstanceEntry(s);
+            subsystem.markDiscreteVarUpdateValueRealized(s, m_InstanceIx);
+        }
+        return Value<InstanceEntry>::downcast(
+            subsystem.getDiscreteVarUpdateValue(s, m_InstanceIx));
+    }
+
+    const PosInfo& getPosInfo(const State& s) const
+    {
+        return Value<PosInfo>::downcast(
+            getSubsystem().getCacheEntry(s, m_PosIx));
+    }
 
     // Apply the correction to the initial condition of the geodesic, and
     // shoot a new geodesic, updating the cache variable.
@@ -206,191 +377,7 @@ public:
         }
     }
 
-    // Set the user defined point that controls the initial wrapping path.
-    // Point is in surface coordinates.
-    void setContactPointHint(Vec3 contactPointHint_S)
-    {
-        m_ContactPointHint_S = contactPointHint_S;
-    }
-
-    // Get the user defined point that controls the initial wrapping path.
-    Vec3 getContactPointHint() const
-    {
-        return m_ContactPointHint_S;
-    }
-
-    const InstanceEntry& getInstanceEntry(const State& s) const
-    {
-        const CableSubsystem& subsystem = getSubsystem();
-        if (!subsystem.isDiscreteVarUpdateValueRealized(s, m_InstanceIx)) {
-            updInstanceEntry(s) = getPrevInstanceEntry(s);
-            subsystem.markDiscreteVarUpdateValueRealized(s, m_InstanceIx);
-        }
-        return Value<InstanceEntry>::downcast(
-            subsystem.getDiscreteVarUpdateValue(s, m_InstanceIx));
-    }
-
-    InstanceEntry& updInstanceEntry(const State& state) const
-    {
-        return Value<InstanceEntry>::updDowncast(
-            getSubsystem().updDiscreteVarUpdateValue(state, m_InstanceIx));
-    }
-
-    const InstanceEntry& getPrevInstanceEntry(const State& state) const
-    {
-        return Value<InstanceEntry>::downcast(
-            getSubsystem().getDiscreteVariable(state, m_InstanceIx));
-    }
-
-    InstanceEntry& updPrevInstanceEntry(State& state) const
-    {
-        return Value<InstanceEntry>::updDowncast(
-            getSubsystem().updDiscreteVariable(state, m_InstanceIx));
-    }
-
-    // Position level cache: Curve in ground frame.
-    struct PosInfo
-    {
-        Transform X_GS{};
-
-        FrenetFrame KP{};
-        FrenetFrame KQ{};
-
-        Variation dKP{};
-        Variation dKQ{};
-
-        SpatialVec unitForce;
-    };
-
-    // Allocate state variables and cache entries.
-    void realizeTopology(State& s)
-    {
-        // Allocate an auto-update discrete variable for the last computed
-        // geodesic.
-        Value<InstanceEntry>* cache = new Value<InstanceEntry>();
-
-        cache->upd().length              = 0.;
-        cache->upd().status              = Status::Liftoff;
-        cache->upd().trackingPointOnLine = getContactPointHint();
-
-        m_InstanceIx = updSubsystem().allocateAutoUpdateDiscreteVariable(
-            s,
-            Stage::Report,
-            cache,
-            Stage::Position);
-
-        PosInfo posInfo{};
-        m_PosIx = updSubsystem().allocateCacheEntry(
-            s,
-            Stage::Position,
-            Stage::Infinity,
-            new Value<PosInfo>(posInfo));
-    }
-
-    void realizePosition(const State& s, Vec3 prevPointG, Vec3 nextPointG) const
-    {
-        if (getSubsystem().isCacheValueRealized(s, m_PosIx)) {
-            throw std::runtime_error(
-                "expected not realized when calling realizePosition");
-        }
-
-        if (getInstanceEntry(s).status == Status::Disabled) {
-            return;
-        }
-
-        // Compute tramsform from local surface frame to ground.
-        const Transform& X_GS = calcSurfaceFrameInGround(s);
-
-        {
-            // Transform the prev and next path points to the surface frame.
-            const Vec3 prevPoint_S = X_GS.shiftBaseStationToFrame(prevPointG);
-            const Vec3 nextPoint_S = X_GS.shiftBaseStationToFrame(nextPointG);
-
-            // Detect liftoff, touchdown and potential invalid configurations.
-            // TODO this doesnt follow the regular invalidation scheme...
-            // Grab the last geodesic that was computed.
-            assertSurfaceBounds(prevPoint_S, nextPoint_S);
-
-            calcTouchdownIfNeeded(prevPoint_S, nextPoint_S, updInstanceEntry(s));
-            calcLiftoffIfNeeded(prevPoint_S, nextPoint_S, updInstanceEntry(s));
-
-            getSubsystem().markDiscreteVarUpdateValueRealized(s, m_InstanceIx);
-        }
-
-        // Transform geodesic in local surface coordinates to ground.
-        {
-            const InstanceEntry& ie = getInstanceEntry(s);
-            PosInfo& ppe            = updPosInfo(s);
-            // Store the the local geodesic in ground frame.
-            ppe.X_GS = X_GS;
-
-            // Store the the local geodesic in ground frame.
-            ppe.KP = X_GS.compose(ie.K_P);
-            ppe.KQ = X_GS.compose(ie.K_Q);
-
-            ppe.dKP[0] = X_GS.R() * ie.dK_P[0];
-            ppe.dKP[1] = X_GS.R() * ie.dK_P[1];
-
-            ppe.dKQ[0] = X_GS.R() * ie.dK_Q[0];
-            ppe.dKQ[1] = X_GS.R() * ie.dK_Q[1];
-        }
-
-        getSubsystem().markCacheValueRealized(s, m_PosIx);
-    }
-
-    void realizeCablePosition(const State& s) const;
-
-    void invalidatePositionLevelCache(const State& state) const
-    {
-        getSubsystem().markCacheValueNotRealized(state, m_PosIx);
-    }
-
-    const CableSpan& getCable() const
-    {
-        return m_Path;
-    }
-
-    CurveSegmentIndex getIndex() const
-    {
-        return m_Index;
-    }
-
-    void setIndex(CurveSegmentIndex ix)
-    {
-        m_Index = ix;
-    }
-
-    const PosInfo& getPosInfo(const State& s) const
-    {
-        return Value<PosInfo>::downcast(
-            getSubsystem().getCacheEntry(s, m_PosIx));
-    }
-
-    /* const MobilizedBody& getMobilizedBody() const {return m_Mobod;} */
-    void calcContactPointVelocitiesInGround(
-        const State& s,
-        Vec3& v_GP,
-        Vec3& v_GQ) const
-    {
-        // TODO use builtin?
-        /* v_GP = m_Mobod.findStationVelocityInGround(state, P_B); */
-
-        // Get body kinematics in ground frame.
-        const Vec3& x_BG = m_Mobod.getBodyOriginLocation(s);
-        const Vec3& w_BG = m_Mobod.getBodyAngularVelocity(s);
-        const Vec3& v_BG = m_Mobod.getBodyOriginVelocity(s);
-
-        const PosInfo& pos = getPosInfo(s);
-
-        // Relative contact point positions to body origin, expressed in ground
-        // frame.
-        Vec3 r_P = pos.KP.p() - x_BG;
-        Vec3 r_Q = pos.KQ.p() - x_BG;
-
-        // Compute contact point velocities in ground frame.
-        v_GP = v_BG + w_BG % r_P;
-        v_GQ = v_BG + w_BG % r_Q;
-    }
+    const MobilizedBody& getMobilizedBody() const {return m_Mobod;}
 
     Transform calcSurfaceFrameInGround(const State& s) const
     {
@@ -482,6 +469,25 @@ public:
     }
 
 private:
+
+    InstanceEntry& updInstanceEntry(const State& state) const
+    {
+        return Value<InstanceEntry>::updDowncast(
+            getSubsystem().updDiscreteVarUpdateValue(state, m_InstanceIx));
+    }
+
+    const InstanceEntry& getPrevInstanceEntry(const State& state) const
+    {
+        return Value<InstanceEntry>::downcast(
+            getSubsystem().getDiscreteVariable(state, m_InstanceIx));
+    }
+
+    InstanceEntry& updPrevInstanceEntry(State& state) const
+    {
+        return Value<InstanceEntry>::updDowncast(
+            getSubsystem().updDiscreteVariable(state, m_InstanceIx));
+    }
+
     PosInfo& updPosInfo(const State& state) const
     {
         return Value<PosInfo>::updDowncast(
