@@ -1213,7 +1213,7 @@ void CableSpan::Impl::applyCorrection(const State& s, const Vector& c) const
 void CableSpan::Impl::invalidatePositionLevelCache(const State& s) const
 {
     for (const CurveSegment& curve : m_CurveSegments) {
-        curve.getImpl().invalidatePositionLevelCache(s);
+        curve.getImpl().invalidatePosEntry(s);
     }
     getSubsystem().markCacheValueNotRealized(s, m_PosInfoIx);
 }
@@ -1343,7 +1343,7 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 
         // Path has changed: invalidate each segment's cache.
         for (const CurveSegment& curve : m_CurveSegments) {
-            curve.getImpl().invalidatePositionLevelCache(s);
+            curve.getImpl().invalidatePosEntry(s);
         }
     }
 
@@ -1352,35 +1352,50 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 
 void CableSpan::Impl::calcVelInfo(const State& s, VelInfo& velInfo) const
 {
-    const PosInfo& pos = getPosInfo(s);
+    auto CalcPointVelocityInGround = [&](
+            const MobilizedBody& mobod,
+            const Vec3& point_G) -> Vec3
+    {
+        // Not using MobilizedBody::findStationVelocityInGround because the
+        // point_G is in ground frame. The following computation is the same
+        // though (minus transforming the point to the ground frame).
+
+        // Get body kinematics in ground frame.
+        const Vec3& x_BG = mobod.getBodyOriginLocation(s);
+        const Vec3& w_BG = mobod.getBodyAngularVelocity(s);
+        const Vec3& v_BG = mobod.getBodyOriginVelocity(s);
+
+        // Compute surface point velocity in ground frame.
+        return v_BG + w_BG % (point_G - x_BG);
+    };
 
     Real& lengthDot = (velInfo.lengthDot = 0.);
 
     Vec3 v_GQ = m_OriginBody.findStationVelocityInGround(s, m_OriginPoint);
     const CurveSegment* lastActive = nullptr;
-    for (const CurveSegment& obstacle : m_CurveSegments) {
-        if (!obstacle.getImpl().getInstanceEntry(s).isActive()) {
+    for (const CurveSegment& curve : m_CurveSegments) {
+        if (!curve.getImpl().getInstanceEntry(s).isActive()) {
             continue;
         }
 
-        const GeodesicInfo& g = obstacle.getImpl().getPosInfo(s);
+        const MobilizedBody& mobod = curve.getImpl().getMobilizedBody();
+        // TODO odd name: "g"
+        const CurveSegment::Impl::PosInfo& g = curve.getImpl().getPosInfo(s);
         const UnitVec3 e_G    = g.KP.R().getAxisUnitVec(TangentAxis);
 
-        Vec3 next_v_GQ;
-        Vec3 v_GP;
-        obstacle.getImpl().calcContactPointVelocitiesInGround(
-            s,
-            v_GP,
-            next_v_GQ);
+        const Vec3 v_GP = CalcPointVelocityInGround(mobod, g.KP.p());
 
         lengthDot += dot(e_G, v_GP - v_GQ);
 
-        v_GQ       = next_v_GQ;
-        lastActive = &obstacle;
+        v_GQ       = CalcPointVelocityInGround(mobod, g.KQ.p());
+
+        lastActive = &curve;
     }
 
     const Vec3 v_GP =
         m_TerminationBody.findStationVelocityInGround(s, m_TerminationPoint);
+
+    const PosInfo& pos = getPosInfo(s);
     const UnitVec3 e_G =
         lastActive ? lastActive->getImpl().getPosInfo(s).KQ.R().getAxisUnitVec(
                          TangentAxis)
@@ -1394,15 +1409,18 @@ void CableSpan::Impl::applyBodyForces(
     Real tension,
     Vector_<SpatialVec>& bodyForcesInG) const
 {
-    // TODO why?
-    if (tension <= 0) {
-        return;
+    if (tension < 0.) {
+        throw std::runtime_error("Cable tension can not go below zero.");
     }
 
-    realizePosition(s);
+    SpatialVec unitForce_G;
+    for (const CurveSegment& curve : m_CurveSegments) {
+        if (!curve.isActive(s)) {
+            return;
+        }
 
-    for (const CurveSegment& segment : m_CurveSegments) {
-        segment.getImpl().applyBodyForce(s, tension, bodyForcesInG);
+        curve.calcUnitForce(s, unitForce_G);
+        curve.getMobilizedBody().applyBodyForce(s,  unitForce_G * tension, bodyForcesInG);
     }
 }
 

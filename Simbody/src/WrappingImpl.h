@@ -174,25 +174,12 @@ public:
             pos.dKQ[1] = X_GS.R() * ie.dK_Q[1];
         }
 
-        // Compute the unit force and moment in ground frame.
-        {
-            const UnitVec3& t_P = pos.KP.R().getAxisUnitVec(TangentAxis);
-            const UnitVec3& t_Q = pos.KQ.R().getAxisUnitVec(TangentAxis);
-            const Vec3 F_G      = t_Q - t_P;
-
-            const Vec3 x_GB       = m_Mobod.getBodyOriginLocation(s);
-            const Vec3 r_P        = pos.KP.p() - x_GB;
-            const Vec3 r_Q        = pos.KQ.p() - x_GB;
-            const Vec3 M_G        = r_Q % t_Q - r_P % t_P;
-            pos.F_G{M_G, F_G};
-        }
-
         getSubsystem().markCacheValueRealized(s, m_PosIx);
     }
 
     void realizeCablePosition(const State& s) const;
 
-    void invalidatePositionLevelCache(const State& state) const
+    void invalidatePosEntry(const State& state) const
     {
         getSubsystem().markCacheValueNotRealized(state, m_PosIx);
     }
@@ -228,6 +215,13 @@ public:
         return m_ContactPointHint_S;
     }
 
+    const MobilizedBody& getMobilizedBody() const {return m_Mobod;}
+
+    CableSubsystem& updSubsystem() { return *m_Subsystem; }
+    const CableSubsystem& getSubsystem() const { return *m_Subsystem; }
+
+    const DecorativeGeometry& getDecoration() const { return m_Decoration; }
+
 //------------------------------------------------------------------------------
 //                         Cache entry access
 //------------------------------------------------------------------------------
@@ -246,6 +240,43 @@ public:
     {
         return Value<PosInfo>::downcast(
             getSubsystem().getCacheEntry(s, m_PosIx));
+    }
+
+    Transform calcSurfaceFrameInGround(const State& s) const
+    {
+        return m_Mobod.getBodyTransform(s).compose(m_X_BS);
+    }
+
+    // Compute the path points of the current geodesic, and write them to
+    // the buffer. These points are in local surface coordinates. Returns
+    // the number of points written.
+    void calcPathPoints(const State& s, std::vector<Vec3>& points) const
+    {
+        const Transform& X_GS           = getPosInfo(s).X_GS;
+        const InstanceEntry& geodesic_S = getInstanceEntry(s);
+        if (!geodesic_S.isActive()) {
+            return;
+        }
+        for (const LocalGeodesicSample& sample : geodesic_S.samples) {
+            points.push_back(X_GS.shiftFrameStationToBase(sample.frame.p()));
+        }
+    }
+
+    void calcUnitForce(const State& s, SpatialVec& unitForce_G) const
+    {
+        const PosInfo& posInfo = getPosInfo(s);
+        const Vec3& x_BG = m_Mobod.getBodyOriginLocation(s);
+
+        // Contact point moment arms in ground.
+        const Vec3 r_P = posInfo.KP.p() - x_BG;
+        const Vec3 r_Q = posInfo.KQ.p() - x_BG;
+
+        // Tangent directions at contact points in ground.
+        const UnitVec3& t_P = posInfo.KP.R().getAxisUnitVec(TangentAxis);
+        const UnitVec3& t_Q = posInfo.KQ.R().getAxisUnitVec(TangentAxis);
+
+        unitForce_G[0] = r_Q % t_Q - r_P % t_P;
+        unitForce_G[1] = t_Q - t_P;
     }
 
     // Apply the correction to the initial condition of the geodesic, and
@@ -359,75 +390,7 @@ public:
         }
         // End of unit test code block...
 
-        invalidatePositionLevelCache(s);
-    }
-
-    // Compute the path points of the current geodesic, and write them to
-    // the buffer. These points are in local surface coordinates. Returns
-    // the number of points written.
-    void calcPathPoints(const State& s, std::vector<Vec3>& points) const
-    {
-        const Transform& X_GS           = getPosInfo(s).X_GS;
-        const InstanceEntry& geodesic_S = getInstanceEntry(s);
-        if (!geodesic_S.isActive()) {
-            return;
-        }
-        for (const LocalGeodesicSample& sample : geodesic_S.samples) {
-            points.push_back(X_GS.shiftFrameStationToBase(sample.frame.p()));
-        }
-    }
-
-    const MobilizedBody& getMobilizedBody() const {return m_Mobod;}
-
-    Transform calcSurfaceFrameInGround(const State& s) const
-    {
-        return m_Mobod.getBodyTransform(s).compose(m_X_BS);
-    }
-
-    SpatialVec calcUnitForceInGround(const State& s) const
-    {
-        const PosInfo& posInfo = getPosInfo(s);
-
-        const UnitVec3& t_P = posInfo.KP.R().getAxisUnitVec(TangentAxis);
-        const UnitVec3& t_Q = posInfo.KQ.R().getAxisUnitVec(TangentAxis);
-        const Vec3 F_G      = t_Q - t_P;
-
-        const Transform& X_GB = m_Mobod.getBodyTransform(s);
-        const Vec3 x_GB       = X_GB.p();
-        const Vec3 r_P        = posInfo.KP.p() - x_GB;
-        const Vec3 r_Q        = posInfo.KQ.p() - x_GB;
-        const Vec3 M_G        = r_Q % t_Q - r_P % t_P;
-
-        return {M_G, F_G};
-    }
-
-    void applyBodyForce(
-        const State& s,
-        Real tension,
-        Vector_<SpatialVec>& bodyForcesInG) const
-    {
-        if (!getInstanceEntry(s).isActive()) {
-            return;
-        }
-
-        m_Mobod.applyBodyForce(s, calcUnitForceInGround(s), bodyForcesInG);
-    }
-
-    // TODO allow for user to shoot his own geodesic.
-    /* void calcGeodesic(State& state, Vec3 x, Vec3 t, Real l) const; */
-
-    CableSubsystem& updSubsystem()
-    {
-        return *m_Subsystem;
-    }
-    const CableSubsystem& getSubsystem() const
-    {
-        return *m_Subsystem;
-    }
-
-    const DecorativeGeometry& getDecoration() const
-    {
-        return m_Decoration;
+        invalidatePosEntry(s);
     }
 
     Vec3 calcInitialContactPoint(const State& s) const
@@ -457,6 +420,8 @@ public:
         Array_<DecorativeGeometry>& decorations) const
     {
         const InstanceEntry& cache = getInstanceEntry(s);
+        if (!cache.isActive()) {return;}
+
         const Transform& X_GS      = calcSurfaceFrameInGround(s);
         Vec3 a = X_GS.shiftFrameStationToBase(cache.K_P.p());
         for (size_t i = 1; i < cache.samples.size(); ++i) {
