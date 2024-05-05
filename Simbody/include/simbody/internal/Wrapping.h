@@ -23,9 +23,7 @@ class CurveSegment;
 class CableSpan;
 
 //==============================================================================
-//                                CURVE SEGMENT
-//==============================================================================
-// A curved segment on a surface that is part of a `CableSpan`.
+// A curved cable segment on a surface that is part of a `CableSpan`.
 class SimTK_SIMBODY_EXPORT CurveSegment final
 {
 private:
@@ -73,55 +71,72 @@ public:
         Disabled,
     };
 
-//------------------------------------------------------------------------------
-//                Parameter interface
-//------------------------------------------------------------------------------
+    /** Get the CableSpan that this segment is a part of. */
     const CableSpan& getCable() const;
 
+    /** Get the ContactGeometry that this segment wraps over. */
     const ContactGeometry& getContactGeometry() const;
 
+    /** Get the MobilizedBody that the contact geometry is rigidly attached to. */
     const Mobod& getMobilizedBody() const;
 
+    /** Get the transform representing the orientation and postion of the
+    contact geometry's origin with respect to the body fixed frame. */
     const Transform& getXformSurfaceToBody() const;
+
+    /** Set the transform representing the orientation and postion of the
+    contact geometry's origin with respect to the body fixed frame. */
     void setXformSurfaceToBody(Transform X_BS);
 
-//------------------------------------------------------------------------------
-//                State dependent getters.
-//------------------------------------------------------------------------------
+    /** Get the length of this segment.
+    The system must be realiezd to Stage::Position. */
     Real getSegmentLength(const State& state) const;
 
+    /** Get the frenet frame at the start (first contact point) of this curve segment.
+    TODO describe the frame axes.
+    The system must be realiezd to Stage::Position. */
     const Transform& getFrenetFrameStart(const State& state) const;
 
+    /** Get the frenet frame at the end (last contact point) of this curve segment.
+    TODO describe the frame axes.
+    The system must be realiezd to Stage::Position. */
     const Transform& getFrenetFrameEnd(const State& state) const;
 
+    /** Get the wrapping status of this segment.
+    The system must be realiezd to Stage::Position. */
     Status getStatus(const State& state) const;
 
+    /** Get the number of steps taken by the GeodesicIntegrator to compute this segment during the last realization.
+    The system must be realiezd to Stage::Position. */
     int getNumberOfIntegratorStepsTaken(const State& state);
 
+    /** Get the initial step size that the GeodesicIntegrator will use for the next path computation.
+    The system must be realiezd to Stage::Position. */
     Real getInitialIntegratorStepSize(const State& state);
 
     // TODO useful?
     /* void setDisabled(const State& state) const; */
     /* void setEnabled(const State& state) const; */
 
-//------------------------------------------------------------------------------
-//                State dependent computations.
-//------------------------------------------------------------------------------
+    /** Compute the unit force vector in Ground frame that this segment exerts
+    on the MobilizedBody. The actual applied force can be found by multiplication with the cable tension.
+    The system must be realiezd to Stage::Position. */
     void calcUnitForce(const State& state, SpatialVec& unitForce_G) const;
 
-    // Compute the curve points in ground frame.
-    //
-    // Use `nPoints` to resample over the curve length at equal intervals using Hermite interpolation.
-    // If `nPoints=0` no interpolation is applied, and the points from the numerical integration are used directly.
-    //
-    // Special cases that will override the `nPoints` argument:
-    // - If the curve length is zero, a single point is written.
-    // - If the curve is not active (disabled or lifted), no points are written.
-    //
-    // Note:
-    // If `nPoints=1`, and the curve length is not zero, an exception is thrown.
-    //
-    // Returns the number of points written.
+    /** Compute points along this segment in Ground frame.
+    The system must be realiezd to Stage::Position.
+
+    @param state State of the system.
+    @param points_G The output buffer to which the points are written.
+    @param Controls the number of points that are computed. These points are
+    resampled from the computed curve at equal length intervals. Optionally,
+    use `nPoints=0` to disable interpolation, and the original points from the
+    GeodesicIntegrator will be used. If the curve length is zero, this
+    parameter is ignored, and a single point is written. If the curve is not
+    active (Status::Disabled or Status::Lifted), no points are written. Note
+    that if nPoints=1, and the curve length is not zero, an exception is
+    thrown.
+    @return The number of points written. */
     int calcPoints(const State& state, std::vector<Vec3>& points_G, int nPoints = 0) const;
 
     bool isActive(const State& state) const
