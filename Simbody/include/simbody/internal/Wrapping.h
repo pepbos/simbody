@@ -38,13 +38,34 @@ public:
     CurveSegment& operator=(CurveSegment&&) noexcept = default;
     ~CurveSegment()                                  = default;
 
+    /** Construct a CurveSegment representing a segment of a CableSpan that
+    wraps over a ContactGeometry.
+    @param cable The cable this segment belongs to.
+    @param mobod The body that the contact geometry is rigidly attached to.
+    @param X_BS Transform specifying the location and orientation of the
+    contact geometry's origin frame with respect to the mobilized body.
+    @param geometry The contact geometry over which this segment wraps.
+    @param initialContactPointHint A guess of the contact point of the cable
+    span and the contact geometry to compute the initial cable path. This point
+    is defined in the local contact geometry's frame. The point will be used as
+    a starting point when computing the initial cable path. As such, it does
+    not have to lie on the contact geometry's surface, nor does it have to
+    belong to a valid cable path.*/
     CurveSegment(
         CableSpan cable,
         const MobilizedBody& mobod,
         Transform X_BS,
         const ContactGeometry& geometry,
-        Vec3 xHint);
+        Vec3 initialContactPointHint);
 
+    /** A helper class, representing the wrapping status of this segment in
+      relation to the contact geometry.
+
+      Status::Ok indicates that the cable is in contact with the surface.
+      Status::Lifted indicates that the cable is not in contact with the surface.
+      Status::Disabled indicates that the surface obstacle is "disabled",
+      preventing any interaction with the
+      cable. */
     enum class Status
     {
         Ok,
