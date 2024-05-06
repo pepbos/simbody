@@ -1363,7 +1363,7 @@ void CableSpan::Impl::calcPathErrorJacobian(
     };
 }
 
-Real CableSpan::Impl::calcPathLength(
+Real CableSpan::Impl::calcCableLength(
     const State& s,
     const std::vector<LineSegment>& lines) const
 {
@@ -1528,11 +1528,14 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
     posInfo.xO = x_O;
     posInfo.xI = x_I;
 
+    // Axes considered when computing the path error.
     const std::array<CoordinateAxis, 2> axes{NormalAxis, BinormalAxis};
 
-    for (posInfo.loopIter = 0; posInfo.loopIter < m_PathMaxIter;
-         ++posInfo.loopIter) {
-
+    posInfo.loopIter = 0;
+    while (true) {
+        // Make sure all curve segments are realized to position stage.
+        // This will transform all last computed geodesics to Ground frame, and
+        // will update each curve's Status.
         for (const CurveSegment& curve : m_CurveSegments) {
             curve.getImpl().realizePosition(
                 s,
@@ -1540,48 +1543,55 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
                 findNextPoint(s, curve));
         }
 
+        // Count the number of active curve segments.
         const size_t nActive = countActive(s);
 
+        // If the path contains no curved segments it is a straight line.
         if (nActive == 0) {
+            // Update the path length, and exit.
             posInfo.l = (x_I - x_O).norm();
-            return;
+            break;
         }
 
-        // Grab the shared data cache for computing the matrices, and lock it.
+        // Grab the shared data cache for helping with computing the path corrections.
+        // This data is only used as an intermediate variable, and will be
+        // discarded after each iteration.
         SolverData& data =
             getSubsystem().getImpl().updCachedScratchboard(s).updOrInsert(
                 nActive);
 
-        // Compute the straight-line segments.
+        // Compute the straight-line segments of this cable span. Note that
+        // there is one more straight line segment, than there are active curve
+        // segments.
         calcLineSegments(s, x_O, x_I, data.lineSegments);
 
-        // Evaluate path error, and stop when converged.
+        // Evaluate path error as the misalignment of the straight line
+        // segments with the curve segment's tangent vectors at the contact
+        // points.
         calcPathErrorVector<2>(s, data.lineSegments, axes, data.pathError);
         const Real maxPathError = data.pathError.normInf();
-        if (maxPathError < m_PathErrorBound ||
-            (posInfo.loopIter + 1) >= m_PathMaxIter) {
-            posInfo.l = 0.;
-            for (const LineSegment& line : data.lineSegments) {
-                posInfo.l += line.l;
-            }
-            for (const CurveSegment& curve : m_CurveSegments) {
-                posInfo.l += curve.getImpl().getInstanceEntry(s).length;
-            }
-            return;
+
+        // Stop iterating if max path error is small, or max iterations is reached.
+        if (maxPathError < m_PathErrorBound || posInfo.loopIter >= m_PathMaxIter) {
+            posInfo.l = calcCableLength(s, data.lineSegments);
+            break;
         }
 
-        // Evaluate the path error jacobian.
+        // Evaluate the path error jacobian to the natural geodesic corrections
+        // of each curve segment.
         calcPathErrorJacobian<2>(
             s,
             data.lineSegments,
             axes,
             data.pathErrorJacobian);
 
-        // Compute path corrections.
+        // Compute the geodesic corrections for each curve segment.
         const Correction* corrIt = calcPathCorrections(data);
 
-        // Apply path corrections.
+        // Apply corrections to the curve segments.
         for (const CurveSegment& curve : m_CurveSegments) {
+            // The corrections were computed for the active segments: Skip any
+            // non-active here.
             if (!curve.getImpl().getInstanceEntry(s).isActive()) {
                 continue;
             }
@@ -1589,14 +1599,20 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
             ++corrIt;
         }
 
-        // Path has changed: invalidate each segment's cache.
+        // Applying the corrections changes the path: invalidate each segment's
+        // cache.
         for (const CurveSegment& curve : m_CurveSegments) {
+            // Also invalidate non-active segments: They might touchdown again.
             curve.getImpl().invalidatePosEntry(s);
         }
+
+         ++posInfo.loopIter;
     }
 
-    // TODO use SimTK_ASSERT
-    throw std::runtime_error("Failed to converge");
+    // TODO throw?
+    if (posInfo.loopIter >= m_PathMaxIter) {
+        std::cout << "CableSpan::calcPosInfo(): Reached max iterations!\n";
+    }
 }
 
 void CableSpan::Impl::calcVelInfo(const State& s, VelInfo& velInfo) const

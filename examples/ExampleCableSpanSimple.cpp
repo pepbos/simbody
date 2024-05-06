@@ -315,9 +315,9 @@ int main()
             Vec3(10., 0.0, 0.1));
 
         Body::Rigid ballBody(MassProperties(1.0, Vec3(0), Inertia(1)));
-        const Real Rad = 2.0;
+        const Real Rad = 1.0;
 
-        Vec3 offset = {0., 0., 0.};
+        Vec3 offset = {-1., 0., 0.};
         Vec3 arm    = {0.25, 0., 0.};
 
         /* UnitVec3 axis0(Vec3{1., 1., 1.}); */
@@ -338,7 +338,7 @@ int main()
             {0., 1., 0.});
 
         Body::Rigid ball2Body(MassProperties(1.0, Vec3(0), Inertia(1)));
-        const Real Rad2 = 1.1;
+        const Real Rad2 = 1.5;
         Vec3 offset2    = {5., 0., 0.};
         Vec3 arm2       = {0.25, 0., 0.};
 
@@ -352,7 +352,8 @@ int main()
         path1.adoptWrappingObstacle(
             ball2,
             Transform(),
-            ContactGeometry::Sphere(Rad2),
+            ContactGeometry::Ellipsoid({Rad2, Rad2 * 1.2, Rad2 * 0.9}),
+            /* ContactGeometry::Sphere(Rad2), */
             {0., 1., 0.});
 
         MyCableSpring cable1(forces, path1, 100., 3.5, 0.1);
@@ -368,6 +369,7 @@ int main()
         Real v          = 0.;
         bool continuous = false;
         Random::Gaussian random;
+        Real phi = 0.;
         while (true) {
             system.realize(s, Stage::Position);
             viz.report(s);
@@ -393,13 +395,15 @@ int main()
                 v = std::min(1e-1, v);
             }
 
+            phi += 0.01;
             for (int i = 0; i < s.getNQ(); ++i) {
                 /* Random::Gaussian random; */
-                s.updQ()[i] += random.getValue() * 1e-1 + v;
+                s.updQ()[i] = sin(phi * static_cast<Real>(i) + random.getValue()*1e-3);
+                std::cout << " q = " << s.getQ()[i] << "\n";
             }
             for (int i = 0; i < s.getNU(); ++i) {
                 /* Random::Gaussian random; */
-                s.updU()[i] += random.getValue() * 1e-3;
+                s.updU()[i] = sin(phi + random.getValue()*1e-3);
             }
 
             if (continuous) {

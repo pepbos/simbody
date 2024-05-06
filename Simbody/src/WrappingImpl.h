@@ -775,7 +775,7 @@ private:
         Vec3 p_I,
         std::vector<LineSegment>& lines) const;
 
-    Real calcPathLength(
+    Real calcCableLength(
         const State& state,
         const std::vector<LineSegment>& lines) const;
 
