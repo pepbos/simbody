@@ -1700,12 +1700,12 @@ void CableSpan::Impl::applyBodyForces(
     Real tension,
     Vector_<SpatialVec>& bodyForcesInG) const
 {
+    realizePosition(s);
     if (tension < 0.) {
         // TODO throw? or skip?
         throw std::runtime_error("Cable tension should be nonnegative.");
     }
 
-    realizePosition(s);
     SpatialVec unitForce_G;
 
     {
