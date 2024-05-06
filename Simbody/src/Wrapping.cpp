@@ -1603,6 +1603,7 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         // Compute the geodesic corrections for each curve segment.
         const Correction* corrIt = calcPathCorrections(data);
 
+        // TODO verify effectiveness of scaling.
         Real scale = 1.;
         size_t offset = 0;
         for (const CurveSegment& curve : m_CurveSegments) {
@@ -1613,6 +1614,7 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
             scale = cScale < scale ? cScale : scale;
         }
         if (scale != 1.) {
+            // TODO remove this debug printing.
             std::cout << "Applied scale = " << scale << "\n";
         }
 

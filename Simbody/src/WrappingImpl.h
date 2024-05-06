@@ -337,8 +337,7 @@ public:
         return scale;
     }
 
-    // TODO This is experimental, might remove later.
-    // TODO Below code should be moved to a unit test...
+    // TODO Below code should be moved to a unit test.
     void assertLastCorrection(const State& s) const
     {
         std::ostream& oss = std::cout;
@@ -366,7 +365,8 @@ public:
             const Vec3 exp_diff = cross(w, a0);
             const Vec3 got_diff      = a1 - a0;
 
-            const bool isOk           = std::abs( (exp_diff - got_diff).norm() / exp_diff.norm() - 1.) < eps;
+            const Real factor = got_diff.norm() / exp_diff.norm();
+            bool isOk         = std::abs(factor  - 1.) < eps;
             if (!isOk) {
                 oss << "    a0 = " << R0.transpose() * a0 << "\n";
                 oss << "    a1 = " << R0.transpose() * a1 << "\n";
@@ -377,6 +377,7 @@ public:
                 oss << "    err           = "
                     << (exp_diff - got_diff).norm() / delta
                     << "\n";
+                oss << "    factor        = " << factor << "\n";
             }
             return isOk;
         };
@@ -420,8 +421,6 @@ public:
 
             const Vec3 w                       = dK[0] * c;
 
-            return isOk;
-
             std::array<CoordinateAxis, 3> axes = {
                 TangentAxis,
                 NormalAxis,
@@ -450,10 +449,12 @@ public:
     // shoot a new geodesic, updating the cache variable.
     void applyGeodesicCorrection(const State& s, const Correction& c) const
     {
-        assertLastCorrection(s);
 
-        // TODO This is experimental, might remove later.
+        // TODO This is experimental, should become a unit test probably.
         {
+            // Test the last correction.
+            assertLastCorrection(s);
+            // Setup data for testing next correction.
             InstanceEntry& cache = updInstanceEntry(s);
             cache.prev_K_P = cache.K_P;
             cache.prev_K_Q = cache.K_Q;
