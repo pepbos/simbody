@@ -60,6 +60,17 @@ public:
 
         Vec3 trackingPointOnLine{NaN, NaN, NaN};
         Status status = Status::Lifted;
+
+        // TODO experimental, might remove later.
+        FrenetFrame prev_K_P;
+        FrenetFrame prev_K_Q;
+        Variation prev_dK_P;
+        Variation prev_dK_Q;
+        Correction prev_correction;
+        Status prev_status = Status::Disabled;
+
+        std::array<Real,2> curvatures_P {NaN, NaN};
+        std::array<Real,2> curvatures_Q {NaN, NaN};
     };
 
     // Position level cache: Curve in ground frame.
@@ -297,21 +308,163 @@ public:
         unitForce_G[1] = t_Q - t_P;
     }
 
+    Real calcCorrectionScale(const State& s, const Correction& c) const
+    {
+        const InstanceEntry& cache = getInstanceEntry(s);
+        Real scale = 1.;
+        constexpr Real smallAngle = 5. / 180. * M_PI;
+
+        auto UpdateScale = [&](Real curvature, Real tryStep) {
+            const Real maxStep = std::abs(smallAngle / curvature);
+            if (std::abs(tryStep) > maxStep) {
+                const Real s = std::abs(maxStep / tryStep);
+                scale = s < scale ? s : scale;
+            }
+        };
+
+        UpdateScale(cache.curvatures_P.at(0), c[0]);
+        UpdateScale(cache.curvatures_P.at(1), c[1]);
+
+        for (int r = 0; r < 2; ++r) {
+            Real tryStep = 0;
+            for (int i = 0; i < 4; ++i) {
+                tryStep += std::abs(cache.dK_Q[1].row(r)[i] * c[i]);
+            }
+            UpdateScale(cache.curvatures_Q.at(r), tryStep);
+        }
+
+        return scale;
+    }
+
+    // TODO This is experimental, might remove later.
+    // TODO Below code should be moved to a unit test...
+    void assertLastCorrection(const State& s) const
+    {
+        std::ostream& oss = std::cout;
+
+        const InstanceEntry& cache = getInstanceEntry(s);
+
+        const Correction& c = cache.prev_correction;
+        const Real delta = c.norm();
+        const Real eps   = 0.05;
+
+        const Real smallAngle = 20. / 180. * Pi;
+
+        if (cache.prev_status != cache.status) {
+            return;
+        }
+
+        auto AssertAxis  = [&](
+                const Rotation& R0,
+                const Rotation& R1,
+                const Vec3& w,
+                CoordinateAxis axis) -> bool {
+            const UnitVec3 a0        = R0.getAxisUnitVec(axis);
+            const UnitVec3 a1        = R1.getAxisUnitVec(axis);
+
+            const Vec3 exp_diff = cross(w, a0);
+            const Vec3 got_diff      = a1 - a0;
+
+            const bool isOk           = std::abs( (exp_diff - got_diff).norm() / exp_diff.norm() - 1.) < eps;
+            if (!isOk) {
+                oss << "    a0 = " << R0.transpose() * a0 << "\n";
+                oss << "    a1 = " << R0.transpose() * a1 << "\n";
+                oss << "    expected diff = "
+                    << R0.transpose() * exp_diff / delta << "\n";
+                oss << "    got      dt_Q = "
+                    << R0.transpose() * got_diff / delta << "\n";
+                oss << "    err           = "
+                    << (exp_diff - got_diff).norm() / delta
+                    << "\n";
+            }
+            return isOk;
+        };
+
+        auto AssertFrame = [&](
+                const Transform& K0,
+                const Transform& K1,
+                const Variation& dK,
+                const std::array<Real, 2>& curvatures) -> bool {
+
+            const Vec3 got_diff = K1.p() - K0.p();
+            const Vec3 exp_diff = dK[1] * c;
+
+            const Real factor = got_diff.norm() / exp_diff.norm();
+            bool isOk         = std::abs(factor  - 1.) < eps;
+            if (!isOk) {
+                oss << "Apply variation c = " << c
+                    << ".norm() = " << delta << "\n";
+                oss << "    x0 = " << K0.p() << "\n";
+                oss << "    x1 = " << K1.p() << "\n";
+                oss << "    maxStep = " <<
+                    std::abs(smallAngle / curvatures.at(0))
+                    << ", " <<
+                    std::abs(smallAngle / curvatures.at(1))
+                    << "\n";
+                oss << "    gotStep = " <<
+                    (K0.R().transpose() * got_diff)[0]
+                    << ", " <<
+                    (K0.R().transpose() * got_diff)[2]
+                    << "\n";
+                oss << "    expected dx_Q = "
+                    << K0.R().transpose() * exp_diff / delta
+                    << "\n";
+                oss << "    got      dx_Q = "
+                    << K0.R().transpose() * got_diff / delta << "\n";
+                oss << "    err           = "
+                    << (exp_diff - got_diff).norm() / delta << "\n";
+                oss << "    factor        = " << factor << "\n";
+                oss << "FAILED position correction\n";
+            }
+
+            const Vec3 w                       = dK[0] * c;
+
+            return isOk;
+
+            std::array<CoordinateAxis, 3> axes = {
+                TangentAxis,
+                NormalAxis,
+                BinormalAxis};
+            for (size_t i = 0; i < 3; ++i) {
+                if (!AssertAxis(K0.R(), K1.R(), w, axes.at(i))) {
+                    isOk = false;
+                    std::cout << "FAILED axis " << i << " correction\n";
+                }
+            }
+
+            return isOk;
+        };
+
+        if (delta > 1e-10) {
+            const bool assertStart = !AssertFrame(cache.prev_K_P, cache.K_P, cache.prev_dK_P, cache.curvatures_P);
+            const bool assertEnd = !AssertFrame(cache.prev_K_Q, cache.K_Q, cache.prev_dK_Q, cache.curvatures_Q);
+            if (assertStart || assertEnd) {
+                // TODO use SimTK_ASSERT
+                throw std::runtime_error("FAILED GEODESIC CORRECTION TEST");
+            }
+        }
+    }
+
     // Apply the correction to the initial condition of the geodesic, and
     // shoot a new geodesic, updating the cache variable.
     void applyGeodesicCorrection(const State& s, const Correction& c) const
     {
+        assertLastCorrection(s);
+
+        // TODO This is experimental, might remove later.
+        {
+            InstanceEntry& cache = updInstanceEntry(s);
+            cache.prev_K_P = cache.K_P;
+            cache.prev_K_Q = cache.K_Q;
+            cache.prev_dK_P = cache.dK_P;
+            cache.prev_dK_Q = cache.dK_Q;
+            cache.prev_correction = c;
+        }
+
         // Get the previous geodesic.
         const InstanceEntry& cache = getInstanceEntry(s);
         const Variation& dK_P      = cache.dK_P;
         const FrenetFrame& K_P     = cache.K_P;
-
-        // TODO This is part of the unit test block below...
-        const FrenetFrame K0_P = cache.K_P;
-        const FrenetFrame K0_Q = cache.K_Q;
-        const Variation dK0_P  = cache.dK_P;
-        const Variation dK0_Q  = cache.dK_Q;
-        // TODO end of part belongning to unit test below..
 
         // Get corrected initial conditions.
         const Vec3 v     = dK_P[1] * c;
@@ -335,84 +488,6 @@ public:
             updInstanceEntry(s));
 
         getSubsystem().markDiscreteVarUpdateValueRealized(s, m_InstanceIx);
-
-        // TODO Below code should be moved to a unit test...
-        const bool DO_UNIT_TEST_HERE = false;
-        if (DO_UNIT_TEST_HERE) {
-            const Real delta = c.norm();
-            const Real eps   = delta / 10.;
-            auto AssertAxis  = [&](const Rotation& R0,
-                                  const Rotation& R1,
-                                  const Vec3& w,
-                                  CoordinateAxis axis) -> bool {
-                const UnitVec3 a0        = R0.getAxisUnitVec(axis);
-                const UnitVec3 a1        = R1.getAxisUnitVec(axis);
-                const Vec3 expected_diff = cross(w, a0);
-                const Vec3 got_diff      = a1 - a0;
-                const bool isOk = (expected_diff - got_diff).norm() < eps;
-                if (!isOk) {
-                    std::cout << "    a0 = " << R0.transpose() * a0 << "\n";
-                    std::cout << "    a1 = " << R0.transpose() * a1 << "\n";
-                    std::cout << "    expected diff = "
-                              << R0.transpose() * expected_diff / delta << "\n";
-                    std::cout << "    got      dt_Q = "
-                              << R0.transpose() * got_diff / delta << "\n";
-                    std::cout << "    err           = "
-                              << (expected_diff - got_diff).norm() / delta
-                              << "\n";
-                }
-                return isOk;
-            };
-
-            auto AssertFrame = [&](const Transform& K0,
-                                   const Transform& K1,
-                                   const Variation& dK0) -> bool {
-                const Vec3 dx_got      = K1.p() - K0.p();
-                const Vec3 dx_expected = dK0[1] * c;
-                bool isOk              = (dx_expected - dx_got).norm() < eps;
-                if (!isOk) {
-                    std::cout << "Apply variation c = " << c
-                              << ".norm() = " << delta << "\n";
-                    std::cout << "    x0 = " << K0.p() << "\n";
-                    std::cout << "    x1 = " << K1.p() << "\n";
-                    std::cout << "    expected dx_Q = "
-                              << K0.R().transpose() * dx_expected / delta
-                              << "\n";
-                    std::cout << "    got      dx_Q = "
-                              << K0.R().transpose() * dx_got / delta << "\n";
-                    std::cout << "    err           = "
-                              << (dx_expected - dx_got).norm() / delta << "\n";
-                    std::cout << "WARNING: Large deviation in final position\n";
-                }
-                const Vec3 w                       = dK0[0] * c;
-                std::array<CoordinateAxis, 3> axes = {
-                    TangentAxis,
-                    NormalAxis,
-                    BinormalAxis};
-                for (size_t i = 0; i < 3; ++i) {
-                    isOk &= AssertAxis(K0.R(), K1.R(), w, axes.at(i));
-                    if (!isOk) {
-                        std::cout << "FAILED axis " << i << "\n";
-                    }
-                }
-
-                return isOk;
-            };
-
-            if (delta > 1e-10) {
-                if (!AssertFrame(K0_P, getInstanceEntry(s).K_P, dK0_P)) {
-                    // TODO use SimTK_ASSERT
-                    throw std::runtime_error(
-                        "Start frame variation check failed");
-                }
-                if (!AssertFrame(K0_Q, getInstanceEntry(s).K_Q, dK0_Q)) {
-                    // TODO use SimTK_ASSERT
-                    throw std::runtime_error(
-                        "End frame variation check failed");
-                }
-            }
-        }
-        // End of unit test code block...
 
         invalidatePosEntry(s);
     }

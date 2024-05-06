@@ -1072,6 +1072,16 @@ void CurveSegment::Impl::shootNewGeodesic(
         m_ProjectionMaxIter,
         m_ProjectionAccuracy,
         cache.samples);
+
+    cache.curvatures_P = {
+        calcNormalCurvature(m_Geometry, cache.K_P.p(), cache.K_P.R().getAxisUnitVec(TangentAxis)),
+        calcNormalCurvature(m_Geometry, cache.K_P.p(), cache.K_P.R().getAxisUnitVec(BinormalAxis)),
+    };
+    cache.curvatures_Q = {
+        calcNormalCurvature(m_Geometry, cache.K_Q.p(), cache.K_Q.R().getAxisUnitVec(TangentAxis)),
+        calcNormalCurvature(m_Geometry, cache.K_Q.p(), cache.K_Q.R().getAxisUnitVec(BinormalAxis)),
+    };
+
     cache.length = l;
 }
 
@@ -1593,6 +1603,19 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         // Compute the geodesic corrections for each curve segment.
         const Correction* corrIt = calcPathCorrections(data);
 
+        Real scale = 1.;
+        size_t offset = 0;
+        for (const CurveSegment& curve : m_CurveSegments) {
+            if (!curve.getImpl().getInstanceEntry(s).isActive()) {
+                continue;
+            }
+            Real cScale = curve.getImpl().calcCorrectionScale(s, *(corrIt + offset));
+            scale = cScale < scale ? cScale : scale;
+        }
+        if (scale != 1.) {
+            std::cout << "Applied scale = " << scale << "\n";
+        }
+
         // Apply corrections to the curve segments.
         for (const CurveSegment& curve : m_CurveSegments) {
             // The corrections were computed for the active segments: Skip any
@@ -1600,7 +1623,7 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
             if (!curve.getImpl().getInstanceEntry(s).isActive()) {
                 continue;
             }
-            curve.getImpl().applyGeodesicCorrection(s, *corrIt);
+            curve.getImpl().applyGeodesicCorrection(s, (*corrIt) * scale);
             ++corrIt;
         }
 
