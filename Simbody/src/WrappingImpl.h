@@ -611,15 +611,15 @@ private:
     Vec3 m_ContactPointHint_S{NaN, NaN, NaN};
 
     // TODO expose getters and setters.
-    size_t m_ProjectionMaxIter = 10;
+    size_t m_ProjectionMaxIter = 50; // TODO set to reasonable value
     Real m_ProjectionAccuracy  = 1e-10;
 
     // TODO expose getters and setters.
     Real m_IntegratorAccuracy = 1e-8;
 
     // TODO expose getters and setters.
-    Real m_TouchdownAccuracy = 1e-4;
-    size_t m_TouchdownIter   = 10;
+    Real m_TouchdownAccuracy = 1e-4; // TODO set to reasonable value
+    size_t m_TouchdownIter   = 50; // TODO set to reasonable value
 };
 
 //==============================================================================
