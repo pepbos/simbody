@@ -308,18 +308,6 @@ void calcSurfaceProjectionFast(
     t = t / norm;
 }
 
-Real calcPointOnLineNearOriginAsFactor(Vec3 a, Vec3 b)
-{
-    const Vec3 e = b - a;
-    Real c       = -dot(a, e) / dot(e, e);
-    return std::max(0., std::min(1., c));
-};
-
-Real calcPointOnLineNearPointAsFactor(Vec3 a, Vec3 b, Vec3 point)
-{
-    return calcPointOnLineNearOriginAsFactor(a - point, b - point);
-};
-
 bool calcNearestPointOnLineImplicitly(
     const ContactGeometry& geometry,
     Vec3 a,
@@ -329,13 +317,15 @@ bool calcNearestPointOnLineImplicitly(
     Real eps)
 {
     // Initial guess.
-    Real alpha = calcPointOnLineNearPointAsFactor(a, b, point);
+    const Vec3 d = b - a;
+    Real alpha = -dot(d, a - point) / dot(d,d);
+    alpha = std::max(0., std::min(alpha, 1.));
+
     size_t iter  = 0;
 
     for (; iter < maxIter; ++iter) {
         // Touchdown point on line.
-        const Vec3 d  = b - a;
-        const Vec3 pl = a + (b - a) * alpha;
+        const Vec3 pl = a + d * alpha;
 
         // Constraint evaluation at touchdown point.
         const Real c = calcSurfaceConstraintValue(geometry, pl);
@@ -368,8 +358,8 @@ bool calcNearestPointOnLineImplicitly(
     }
 
     // Write the point on line nearest the surface.
-    alpha = std::max(std::min(1., alpha), 0.);
-    point = a + (b - a) * alpha;
+    alpha = std::max(0., std::min(alpha, 1.));
+    point = a + d * alpha;
 
     // Assumes a negative constraint evaluation means touchdown.
     const bool contact = calcSurfaceConstraintValue(geometry, point) < eps;
@@ -948,7 +938,7 @@ void CurveSegment::Impl::calcTouchdownIfNeeded(
     const Vec3& nextPoint_S,
     CurveSegment::Impl::InstanceEntry& cache) const
 {
-    // Only attempt touchdown when liftoff.
+    // Only attempt touchdown when lifted.
     LocalGeodesicInfo& g = cache;
     if (g.status != Status::Lifted) {
         return;
@@ -967,7 +957,7 @@ void CurveSegment::Impl::calcTouchdownIfNeeded(
         return;
     }
 
-    // Touchdown detected: Remove the liftoff status flag.
+    // Touchdown detected: Remove the Lifted status flag.
     g.status = Status::Ok;
     // Shoot a zero length geodesic at the touchdown point.
     shootNewGeodesic(
