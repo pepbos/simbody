@@ -399,11 +399,6 @@ int main()
             for (int i = 0; i < s.getNQ(); ++i) {
                 /* Random::Gaussian random; */
                 s.updQ()[i] = sin(phi * static_cast<Real>(i) + random.getValue()*1e-3);
-                std::cout << " q = " << s.getQ()[i] << "\n";
-            }
-            for (int i = 0; i < s.getNU(); ++i) {
-                /* Random::Gaussian random; */
-                s.updU()[i] = sin(phi + random.getValue()*1e-3);
             }
 
             if (continuous) {

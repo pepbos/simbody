@@ -1719,9 +1719,11 @@ int CableSpan::Impl::calcDecorativeGeometryAndAppend(
     decorations.push_back(DecorativePoint(ppe.xO).setColor(Green));
     decorations.push_back(DecorativePoint(ppe.xI).setColor(Red));
 
-    /* decorations.push_back(DecorativeLine(ppe.xO, ppe.xI) */
-    /*         .setColor(Purple) */
-    /*         .setLineThickness(3)); */
+    if (countActive(s) == 0) {
+        decorations.push_back(DecorativeLine(ppe.xO, ppe.xI)
+                .setColor(Purple)
+                .setLineThickness(3));
+    }
 
     for (const CurveSegment& curveSegment : m_CurveSegments) {
         const CurveSegment::Impl& curve = curveSegment.getImpl();
