@@ -47,6 +47,8 @@ using std::cout; using std::endl;
 //                    CONTACT GEOMETRY :: SPHERE & IMPL
 //==============================================================================
 
+/* bool ContactGeometryImpl::Sphere::analyticFormAvailable() const {return true;} */
+
 ContactGeometry::Sphere::Sphere(Real radius)
 :   ContactGeometry(new Sphere::Impl(radius)) {}
 

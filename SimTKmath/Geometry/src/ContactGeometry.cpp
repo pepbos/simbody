@@ -181,6 +181,190 @@ void ContactGeometry::calcSurfacePrincipalCurvatures(const Vec3& point,
 Vec3 ContactGeometry::calcSupportPoint(UnitVec3 direction) const 
 {   return getImpl().calcSupportPoint(direction); }
 
+using FrenetFrame        = ContactGeometry::FrenetFrame;
+using GeodesicVariation  = ContactGeometry::GeodesicVariation;
+using GeodesicCorrection = ContactGeometry::GeodesicCorrection;
+
+/* void ContactGeometry::calcGeodesicWithVariationAnalytically( */
+/*     Vec3 xGuess, */
+/*     Vec3 tGuess, */
+/*     Real l, */
+/*     FrenetFrame& K_P, */
+/*     GeodesicVariation& dK_P, */
+/*     FrenetFrame& K_Q, */
+/*     GeodesicVariation& dK_Q) const */
+/* { */
+/*     getImpl().calcGeodesicWithVariationAnalytically(xGuess, tGuess, l, K_P, dK_P, K_Q, dK_Q); */
+/* } */
+
+/* void ContactGeometry::resampleGeodesicPointsAnalytically( */
+/*     const FrenetFrame& K_P, */
+/*     const FrenetFrame& K_Q, */
+/*     Real l, */
+/*     size_t size, */
+/*     std::vector<Vec3>& points) const */
+/* { */
+/*     getImpl().resampleGeodesicPointsAnalytically(K_P, K_Q, l, size, points); */
+/* } */
+
+/* void ContactGeometry::resampleGeodesicFramesAnalytically( */
+/*     const FrenetFrame& K_P, */
+/*     const FrenetFrame& K_Q, */
+/*     Real l, */
+/*     size_t size, */
+/*     std::vector<FrenetFrame>& frames) const */
+/* { */
+/*     getImpl().resampleGeodesicFramesAnalytically(K_P, K_Q, l, size, frames); */
+/* } */
+
+/* size_t ContactGeometry::calcNearestFrenetFrameImplicitlyFast( */
+/*     Vec3 xGuess, */
+/*     Vec3 tGuess, */
+/*     FrenetFrame& K_P, */
+/*     size_t maxIter, */
+/*     Real eps) const */
+/* { */
+/*     return getImpl().calcNearestFrenetFrameImplicitlyFast(xGuess, tGuess, K_P, maxIter, eps); */
+/* } */
+
+/* void ContactGeometry::calcGeodesicStartFrameVariationImplicitly( */
+/*     const FrenetFrame& K_P, */
+/*     GeodesicVariation& dK_P) const */
+/* { */
+/*     getImpl().calcGeodesicStartFrameVariationImplicitly(K_P, dK_P); */
+/* } */
+
+/* void ContactGeometry::calcGeodesicEndFrameVariationImplicitly( */
+/*     const FrenetFrame& K_P, */
+/*     Real l, */
+/*     FrenetFrame& K_Q, */
+/*     GeodesicVariation& dK_Q, */
+/*     Real initStepSize, */
+/*     Real accuracy, */
+/*     std::vector<FrenetFrame>& frames) const */
+/* { */
+/*     getImpl().calcGeodesicEndFrameVariationImplicitly(K_P, l, K_Q, dK_Q, initStepSize, accuracy, frames); */
+/* } */
+
+/* bool ContactGeometry::calcNearestPointOnLineImplicitly( */
+/*     Vec3 a, */
+/*     Vec3 b, */
+/*     Vec3& point, */
+/*     size_t maxIter, */
+/*     double eps) const */
+/* { */
+/*     return getImpl().calcNearestPointOnLineImplicitly(a, b, point, maxIter, eps); */
+/* } */
+
+/* bool ContactGeometry::calcNearestPointOnLineAnalytically( */
+/*         Vec3 a, */
+/*         Vec3 b, */
+/*         Vec3& point) const */
+/* { */
+/*     return getImpl().calcNearestPointOnLineAnalytically(a, b, point); */
+/* } */
+
+//==============================================================================
+//                            IMPLICIT METHODS
+//==============================================================================
+
+// TODO is this right?
+/* size_t ContactGeometryImpl::calcNearestFrenetFrameImplicitlyFast( */
+/*         Vec3 xGuess, */
+/*         Vec3 tGuess, */
+/*         FrenetFrame& K_P, */
+/*         size_t maxIter, */
+/*         Real eps) const */
+/* { */
+/*     SimTK_THROW2(Exception::UnimplementedVirtualMethod, */ 
+/*             "ContactGeometryImpl", "calcNearestFrenetFrameImplicitlyFast"); */ 
+/*     /1* Vec3& x = xGuess; *1/ */
+/*     /1* size_t it = 0; *1/ */
+/*     /1* for (; it < maxIter; ++it) { *1/ */
+/*     /1*     const double c = calcSurfaceValue(x); *1/ */
+
+/*     /1*     const double error = std::abs(c); *1/ */
+
+/*     /1*     if (error < eps) { *1/ */
+/*     /1*         break; *1/ */
+/*     /1*     } *1/ */
+
+/*     /1*     const Vec3 g = calcSurfaceGradient(x); *1/ */
+
+/*     /1*     x += -g * c / dot(g,g); *1/ */
+/*     /1* } *1/ */
+
+/*     /1* UnitVec3 n (calcSurfaceGradient(x)); *1/ */
+/*     /1* Vec3& t = tGuess; *1/ */
+/*     /1* if (!(abs(t % n) > 1e-13)) { *1/ */
+/*     /1*     // TODO split NaN detection. *1/ */
+/*     /1*     throw std::runtime_error("Surface projection failed: Tangent guess is parallel to surface normal, or there are NaNs..."); *1/ */
+/*     /1* } *1/ */
+
+/*     /1* t = t - dot(n, t) * n; *1/ */
+
+/*     /1* K_P.updR().setRotationFromTwoAxes(n, NormalAxis, t, TangentAxis); *1/ */
+/*     /1* K_P.setP(x); *1/ */
+
+/*     /1* return it; *1/ */
+/* } */
+
+/* void ContactGeometryImpl::calcGeodesicStartFrameVariationImplicitly( */
+/*         const FrenetFrame& K_P, */
+/*         ContactGeometry::GeodesicVariation& dK_P) const */
+/* { */
+/*     SimTK_THROW2(Exception::UnimplementedVirtualMethod, */ 
+/*             "ContactGeometryImpl", "calcGeodesicStartFrameVariationImplicitly"); */ 
+/*     /1* const UnitVec3& t = K_P.R().getAxisUnitVec(TangentAxis); *1/ */
+/*     /1* const UnitVec3& n = K_P.R().getAxisUnitVec(NormalAxis); *1/ */
+/*     /1* const UnitVec3& b = K_P.R().getAxisUnitVec(BinormalAxis); *1/ */
+
+/*     /1* const Vec3& x = K_P.p(); *1/ */
+
+/*     /1* dK_P.at(0)[1] = t; *1/ */
+/*     /1* dK_P.at(1)[1] = b; //  * q.a; // a = 1 *1/ */
+/*     /1* dK_P.at(2)[1] = Vec3{0.}; // b * q.r; // r = 0 *1/ */
+/*     /1* dK_P.at(3)[1] = Vec3{0.}; // isEnd ? t : Vec3{0., 0., 0.}; *1/ */
+
+/*     /1* const double tau_g   = calcGeodesicTorsion(x, t); *1/ */
+/*     /1* const double kappa_n = calcNormalCurvature(x, t); *1/ */
+/*     /1* const double kappa_a = calcNormalCurvature(x, b); *1/ */
+
+/*     /1* dK_P.at(0)[0] = tau_g * t +  kappa_n * b; *1/ */
+/*     /1* dK_P.at(1)[0] = -kappa_a * t - tau_g * b; *1/ */
+/*     /1* dK_P.at(2)[0] = -n; *1/ */
+/*     /1* dK_P.at(3)[0] = Vec3{0.}; *1/ */
+/* } */
+
+/* void ContactGeometryImpl::calcGeodesicEndFrameVariationImplicitly( */
+/*         const FrenetFrame& KP, */
+/*         Real l, */
+/*         FrenetFrame& K_Q, */
+/*         GeodesicVariation& dK_Q, */
+/*         Real initStepSize, */
+/*         Real accuracy, */
+/*         std::vector<FrenetFrame>& frames) const */
+/* {   SimTK_THROW2(Exception::UnimplementedVirtualMethod, */ 
+/*         "ContactGeometryImpl", "calcGeodesicEndFrameVariationImplicitly"); } */
+
+/* bool ContactGeometryImpl::calcNearestPointOnLineImplicitly( */
+/*         Vec3 a, */
+/*         Vec3 b, */
+/*         Vec3& point, */
+/*         size_t maxIter, */
+/*         double eps) const */
+/* {   SimTK_THROW2(Exception::UnimplementedVirtualMethod, */ 
+/*         "ContactGeometryImpl", "calcNearestPointOnLineImplicitly"); } */
+
+Real ContactGeometry::calcNormalCurvature(Vec3 x, UnitVec3 t) const
+{
+    return getImpl().calcNormalCurvature(x, t);
+}
+
+Real ContactGeometry::calcGeodesicTorsion(Vec3 x, UnitVec3 t) const
+{
+    return getImpl().calcGeodesicTorsion(x, t);
+}
 
 //------------------------------------------------------------------------------
 //                        EVAL PARAMETRIC CURVATURE

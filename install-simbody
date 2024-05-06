@@ -1,0 +1,25 @@
+#!/usr/bin/bash
+set -xeuo pipefail
+
+WORKSPACE=$(dirname $(dirname $(realpath "$0")))
+echo $WORKSPACE
+
+if [ ! -d "$WORKSPACE/simbody-build" ]; then
+	mkdir -p "$WORKSPACE/simbody-build"
+	mkdir -p "$WORKSPACE/simbody-install"
+
+	env -C $WORKSPACE cmake -B "simbody-build" -S "simbody" -DCMAKE_INSTALL_PREFIX="simbody-install"  -DCMAKE_EXPORT_COMPILE_COMMANDS="ON" -DCMAKE_BUILD_TYPE="RelWithDebInfo"
+fi
+
+env -C $WORKSPACE cmake --build "simbody-build" -j$(nproc) --target "install"
+
+ln -sf "$WORKSPACE/simbody-build/compile_commands.json" "$WORKSPACE/simbody/compile_commands.json"
+
+# env -C "$WORKSPACE/simbody-build" ctest --parallel -j$(nproc) --output-on-failure
+
+LD_LIBRARY_PATH="$WORKSPACE/simbody-install/lib"
+# env -C "$WORKSPACE/simbody-build" ./ExampleCableTest
+# env -C "$WORKSPACE/simbody-build" ./ExampleCablePath
+env -C "$WORKSPACE/simbody-build" ./ExampleCableSpan
+# env -C "$WORKSPACE/simbody-build" ./ExampleCableSpanSimple
+# env -C "$WORKSPACE/simbody-build" gdb --args ExampleCableSpan
