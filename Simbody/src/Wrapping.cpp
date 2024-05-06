@@ -1711,6 +1711,7 @@ int CableSpan::Impl::calcDecorativeGeometryAndAppend(
     Stage stage,
     Array_<DecorativeGeometry>& decorations) const
 {
+    // TODO clean this up. (also, should decorations be done here?)
     const Vec3 color = Green; // Red Purple
 
     const PosInfo& ppe = getPosInfo(s);
@@ -1750,6 +1751,7 @@ int CableSpan::Impl::calcDecorativeGeometryAndAppend(
                                       .setLineThickness(2));
         }
 
+        // TODO this is for debugging: Draw the Frenet frames
         Transform K_P                            = curve.getPosInfo(s).KP;
         Transform K_Q                            = curve.getPosInfo(s).KQ;
         const std::array<CoordinateAxis, 3> axes = {
