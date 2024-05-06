@@ -174,6 +174,16 @@ int CableSpan::calcPoints(const State& state, std::vector<Vec3>& points_G, int n
     return getImpl().calcPathPoints(state, points_G, nPointsPerCurveSegment);
 }
 
+void CableSpan::calcUnitForceAtOrigin(const State& state, SpatialVec& unitForce_G) const
+{
+    getImpl().calcUnitForceAtOrigin(state, unitForce_G);
+}
+
+void CableSpan::calcUnitForceAtTermination(const State& state, SpatialVec& unitForce_G) const
+{
+    getImpl().calcUnitForceAtTermination(state, unitForce_G);
+}
+
 Real CableSpan::calcCablePower(const State& state, Real tension) const
 {
     return getImpl().calcCablePower(state, tension);

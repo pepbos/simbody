@@ -231,12 +231,25 @@ public:
 //------------------------------------------------------------------------------
 //                State dependent calculations
 //------------------------------------------------------------------------------
-    Real calcCablePower(const State& state, Real tension) const;
+
+    /** Compute the unit force vector in Ground frame that this cable exerts on
+    the cable's origin body. The actual applied force can be found by
+    multiplication with the cable tension.
+    The system must be realiezd to Stage::Position. */
+    void calcUnitForceAtOrigin(const State& state, SpatialVec& unitForce_G) const;
+
+    /** Compute the unit force vector in Ground frame that this cable exerts on
+    the cable's termination body. The actual applied force can be found by
+    multiplication with the cable tension.
+    The system must be realiezd to Stage::Position. */
+    void calcUnitForceAtTermination(const State& state, SpatialVec& unitForce_G) const;
 
     void applyBodyForces(
         const State& state,
         Real tension,
         Vector_<SpatialVec>& bodyForcesInG) const;
+
+    Real calcCablePower(const State& state, Real tension) const;
 
     // Calls `CurveSegment::calcPoints` on each active curve segment.
     int calcPoints(const State& state, std::vector<Vec3>& points_G, int nPointsPerCurveSegment = 0) const;

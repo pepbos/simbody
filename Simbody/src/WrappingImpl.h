@@ -78,9 +78,9 @@ public:
 //------------------------------------------------------------------------------
 
 public:
-    Impl()                           = delete;
-    Impl(const Impl&)                = delete;
-    Impl& operator=(const Impl&)     = delete;
+    Impl()                       = delete;
+    Impl(const Impl&)            = delete;
+    Impl& operator=(const Impl&) = delete;
 
     ~Impl()                          = default;
     Impl(Impl&&) noexcept            = default;
@@ -125,6 +125,7 @@ public:
     void realizePosition(const State& s, Vec3 prevPointG, Vec3 nextPointG) const
     {
         if (getSubsystem().isCacheValueRealized(s, m_PosIx)) {
+            // TODO use SimTK_ASSERT
             throw std::runtime_error(
                 "expected not realized when calling realizePosition");
         }
@@ -146,7 +147,10 @@ public:
             // Grab the last geodesic that was computed.
             assertSurfaceBounds(prevPoint_S, nextPoint_S);
 
-            calcTouchdownIfNeeded(prevPoint_S, nextPoint_S, updInstanceEntry(s));
+            calcTouchdownIfNeeded(
+                prevPoint_S,
+                nextPoint_S,
+                updInstanceEntry(s));
             calcLiftoffIfNeeded(prevPoint_S, nextPoint_S, updInstanceEntry(s));
 
             getSubsystem().markDiscreteVarUpdateValueRealized(s, m_InstanceIx);
@@ -156,7 +160,7 @@ public:
         const InstanceEntry& ie = getInstanceEntry(s);
 
         // Start updating the position level cache.
-        PosInfo& pos            = updPosInfo(s);
+        PosInfo& pos = updPosInfo(s);
 
         // Transform geodesic in local surface coordinates to ground.
         {
@@ -215,17 +219,38 @@ public:
         return m_ContactPointHint_S;
     }
 
-    const ContactGeometry& getContactGeometry() const {return m_Geometry;}
+    const ContactGeometry& getContactGeometry() const
+    {
+        return m_Geometry;
+    }
 
-    const DecorativeGeometry& getDecoration() const { return m_Decoration; }
+    const DecorativeGeometry& getDecoration() const
+    {
+        return m_Decoration;
+    }
 
-    const MobilizedBody& getMobilizedBody() const {return m_Mobod;}
+    const MobilizedBody& getMobilizedBody() const
+    {
+        return m_Mobod;
+    }
 
-    const Transform& getXformSurfaceToBody() const {return m_X_BS;}
-    void setXformSurfaceToBody(Transform X_BS) {m_X_BS = std::move(X_BS);}
+    const Transform& getXformSurfaceToBody() const
+    {
+        return m_X_BS;
+    }
+    void setXformSurfaceToBody(Transform X_BS)
+    {
+        m_X_BS = std::move(X_BS);
+    }
 
-    const CableSubsystem& getSubsystem() const { return *m_Subsystem; }
-    CableSubsystem& updSubsystem() { return *m_Subsystem; }
+    const CableSubsystem& getSubsystem() const
+    {
+        return *m_Subsystem;
+    }
+    CableSubsystem& updSubsystem()
+    {
+        return *m_Subsystem;
+    }
 
 //------------------------------------------------------------------------------
 //                         Cache entry access
@@ -252,12 +277,13 @@ public:
         return m_Mobod.getBodyTransform(s).compose(m_X_BS);
     }
 
-    int calcPathPoints(const State& s, std::vector<Vec3>& points, int nSamples) const;
+    int calcPathPoints(const State& s, std::vector<Vec3>& points, int nSamples)
+        const;
 
     void calcUnitForce(const State& s, SpatialVec& unitForce_G) const
     {
         const PosInfo& posInfo = getPosInfo(s);
-        const Vec3& x_BG = m_Mobod.getBodyOriginLocation(s);
+        const Vec3& x_BG       = m_Mobod.getBodyOriginLocation(s);
 
         // Contact point moment arms in ground.
         const Vec3 r_P = posInfo.KP.p() - x_BG;
@@ -311,49 +337,51 @@ public:
         getSubsystem().markDiscreteVarUpdateValueRealized(s, m_InstanceIx);
 
         // TODO Below code should be moved to a unit test...
-        const bool DO_UNIT_TEST_HERE = true;
-        if (DO_UNIT_TEST_HERE)
-        {
+        const bool DO_UNIT_TEST_HERE = false;
+        if (DO_UNIT_TEST_HERE) {
             const Real delta = c.norm();
             const Real eps   = delta / 10.;
             auto AssertAxis  = [&](const Rotation& R0,
-                    const Rotation& R1,
-                    const Vec3& w,
-                    CoordinateAxis axis) -> bool {
+                                  const Rotation& R1,
+                                  const Vec3& w,
+                                  CoordinateAxis axis) -> bool {
                 const UnitVec3 a0        = R0.getAxisUnitVec(axis);
                 const UnitVec3 a1        = R1.getAxisUnitVec(axis);
                 const Vec3 expected_diff = cross(w, a0);
                 const Vec3 got_diff      = a1 - a0;
-                const bool isOk          = (expected_diff - got_diff).norm() < eps;
+                const bool isOk = (expected_diff - got_diff).norm() < eps;
                 if (!isOk) {
                     std::cout << "    a0 = " << R0.transpose() * a0 << "\n";
                     std::cout << "    a1 = " << R0.transpose() * a1 << "\n";
                     std::cout << "    expected diff = "
-                        << R0.transpose() * expected_diff / delta << "\n";
+                              << R0.transpose() * expected_diff / delta << "\n";
                     std::cout << "    got      dt_Q = "
-                        << R0.transpose() * got_diff / delta << "\n";
+                              << R0.transpose() * got_diff / delta << "\n";
                     std::cout << "    err           = "
-                        << (expected_diff - got_diff).norm() / delta << "\n";
+                              << (expected_diff - got_diff).norm() / delta
+                              << "\n";
                 }
                 return isOk;
             };
 
             auto AssertFrame = [&](const Transform& K0,
-                    const Transform& K1,
-                    const Variation& dK0) -> bool {
+                                   const Transform& K1,
+                                   const Variation& dK0) -> bool {
                 const Vec3 dx_got      = K1.p() - K0.p();
                 const Vec3 dx_expected = dK0[1] * c;
                 bool isOk              = (dx_expected - dx_got).norm() < eps;
                 if (!isOk) {
-                    std::cout << "Apply variation c = " << c << "\n";
+                    std::cout << "Apply variation c = " << c
+                              << ".norm() = " << delta << "\n";
                     std::cout << "    x0 = " << K0.p() << "\n";
                     std::cout << "    x1 = " << K1.p() << "\n";
                     std::cout << "    expected dx_Q = "
-                        << K0.R().transpose() * dx_expected / delta << "\n";
+                              << K0.R().transpose() * dx_expected / delta
+                              << "\n";
                     std::cout << "    got      dx_Q = "
-                        << K0.R().transpose() * dx_got / delta << "\n";
+                              << K0.R().transpose() * dx_got / delta << "\n";
                     std::cout << "    err           = "
-                        << (dx_expected - dx_got).norm() / delta << "\n";
+                              << (dx_expected - dx_got).norm() / delta << "\n";
                     std::cout << "WARNING: Large deviation in final position\n";
                 }
                 const Vec3 w                       = dK0[0] * c;
@@ -373,10 +401,14 @@ public:
 
             if (delta > 1e-10) {
                 if (!AssertFrame(K0_P, getInstanceEntry(s).K_P, dK0_P)) {
-                    throw std::runtime_error("Start frame variation check failed");
+                    // TODO use SimTK_ASSERT
+                    throw std::runtime_error(
+                        "Start frame variation check failed");
                 }
                 if (!AssertFrame(K0_Q, getInstanceEntry(s).K_Q, dK0_Q)) {
-                    throw std::runtime_error("End frame variation check failed");
+                    // TODO use SimTK_ASSERT
+                    throw std::runtime_error(
+                        "End frame variation check failed");
                 }
             }
         }
@@ -389,6 +421,7 @@ public:
     {
         const InstanceEntry& ic = getInstanceEntry(s);
         if (!ic.isActive()) {
+            // TODO use SimTK_ASSERT
             throw std::runtime_error(
                 "Invalid contact point: Curve is not active");
         }
@@ -400,6 +433,7 @@ public:
     {
         const InstanceEntry& ic = getInstanceEntry(s);
         if (!ic.isActive()) {
+            // TODO use SimTK_ASSERT
             throw std::runtime_error(
                 "Invalid contact point: Curve is not active");
         }
@@ -412,10 +446,12 @@ public:
         Array_<DecorativeGeometry>& decorations) const
     {
         const InstanceEntry& cache = getInstanceEntry(s);
-        if (!cache.isActive()) {return;}
+        if (!cache.isActive()) {
+            return;
+        }
 
-        const Transform& X_GS      = calcSurfaceFrameInGround(s);
-        Vec3 a = X_GS.shiftFrameStationToBase(cache.K_P.p());
+        const Transform& X_GS = calcSurfaceFrameInGround(s);
+        Vec3 a                = X_GS.shiftFrameStationToBase(cache.K_P.p());
         for (size_t i = 1; i < cache.samples.size(); ++i) {
             const Vec3 b =
                 X_GS.shiftFrameStationToBase(cache.samples.at(i).frame.p());
@@ -426,7 +462,6 @@ public:
     }
 
 private:
-
     InstanceEntry& updInstanceEntry(const State& state) const
     {
         return Value<InstanceEntry>::updDowncast(
@@ -499,11 +534,14 @@ private:
 
     Vec3 m_ContactPointHint_S{NaN, NaN, NaN};
 
+    // TODO expose getters and setters.
     size_t m_ProjectionMaxIter = 10;
     Real m_ProjectionAccuracy  = 1e-10;
 
+    // TODO expose getters and setters.
     Real m_IntegratorAccuracy = 1e-8;
 
+    // TODO expose getters and setters.
     Real m_TouchdownAccuracy = 1e-4;
     size_t m_TouchdownIter   = 10;
 };
@@ -585,7 +623,10 @@ public:
         Stage stage,
         Array_<DecorativeGeometry>& decorations) const;
 
-    int calcPathPoints(const State& state, std::vector<Vec3>& points_G, int nPointsPerCurveSegment) const
+    int calcPathPoints(
+        const State& state,
+        std::vector<Vec3>& points_G,
+        int nPointsPerCurveSegment) const
     {
         // Write the initial point.
         const PosInfo& pos = getPosInfo(state);
@@ -594,7 +635,10 @@ public:
         // Write points along each of the curves.
         int count = 0; // Count number of points written.
         for (const CurveSegment& curve : m_CurveSegments) {
-            count += curve.getImpl().calcPathPoints(state, points_G, nPointsPerCurveSegment);
+            count += curve.getImpl().calcPathPoints(
+                state,
+                points_G,
+                nPointsPerCurveSegment);
         }
 
         // Write the termination point.
@@ -604,9 +648,48 @@ public:
         return count + 2;
     }
 
-    Real calcCablePower(
-        const State& state, Real tension) const
+    void calcUnitForceAtOrigin(const State& s, SpatialVec& unitForce_G) const
     {
+        const PosInfo& posInfo = getPosInfo(s);
+        const Vec3& x_BG       = getOriginBody().getBodyOriginLocation(s);
+
+        // Origin contact point moment arm in ground.
+        const Vec3& r = m_OriginPoint;
+
+        // Tangent direction at origin contact point in ground.
+        // TODO fix finding first active segment.
+        const UnitVec3& t =
+            UnitVec3(findNextPoint(s, CurveSegmentIndex(-1)) - posInfo.xO);
+
+        unitForce_G[0] = -r % t;
+        unitForce_G[1] = -Vec3(t);
+    }
+
+    void calcUnitForceAtTermination(const State& s, SpatialVec& unitForce_G)
+        const
+    {
+        const PosInfo& posInfo = getPosInfo(s);
+        const Vec3& x_BG       = getTerminationBody().getBodyOriginLocation(s);
+
+        // Termination contact point moment arm in ground.
+        const Vec3& r = m_TerminationPoint;
+
+        // Tangent directions at termination contact point in ground.
+        // TODO fix finding last active segment.
+        const UnitVec3& t = UnitVec3(
+            posInfo.xI -
+            findNextPoint(s, CurveSegmentIndex(getNumCurveSegments())));
+
+        unitForce_G[0] = r % t;
+        unitForce_G[1] = Vec3(t);
+    }
+
+    Real calcCablePower(const State& state, Real tension) const
+    {
+        if (tension < 0.) {
+            // TODO use SimTK_ASSERT
+            throw std::runtime_error("Cable tension must be nonnegative");
+        }
         SpatialVec unitForce;
 
         Real unitPower = 0.;
@@ -617,8 +700,10 @@ public:
             unitPower += ~unitForce * v;
         }
 
-        for (const CurveSegment& curve: m_CurveSegments) {
-            if (!curve.isActive(state)) {continue;}
+        for (const CurveSegment& curve : m_CurveSegments) {
+            if (!curve.isActive(state)) {
+                continue;
+            }
 
             curve.calcUnitForce(state, unitForce);
             SpatialVec v = curve.getMobilizedBody().getBodyVelocity(state);
@@ -694,41 +779,13 @@ private:
         const State& state,
         const std::vector<LineSegment>& lines) const;
 
-    const Mobod& getOriginBody() const {return m_OriginBody;}
-    const Mobod& getTerminationBody() const {return m_TerminationBody;}
-
-    void calcUnitForceAtOrigin(const State& s, SpatialVec& unitForce_G) const
+    const Mobod& getOriginBody() const
     {
-        const PosInfo& posInfo = getPosInfo(s);
-        const Vec3& x_BG = getOriginBody().getBodyOriginLocation(s);
-
-        // Origin contact point moment arm in ground.
-        const Vec3& r = m_OriginPoint;
-
-        // Tangent direction at origin contact point in ground.
-        // TODO fix finding first active segment.
-        const UnitVec3& t = UnitVec3(findNextPoint(s, CurveSegmentIndex(-1)) - posInfo.xO);
-
-        unitForce_G[0] = - r % t;
-        unitForce_G[1] = - Vec3(t);
+        return m_OriginBody;
     }
-
-    void calcUnitForceAtTermination(const State& s, SpatialVec& unitForce_G) const
+    const Mobod& getTerminationBody() const
     {
-        const PosInfo& posInfo = getPosInfo(s);
-        const Vec3& x_BG = getTerminationBody().getBodyOriginLocation(s);
-
-        // Termination contact point moment arm in ground.
-        const Vec3& r = m_TerminationPoint;
-
-        // Tangent directions at termination contact point in ground.
-        // TODO fix finding last active segment.
-        const UnitVec3& t = UnitVec3(
-                posInfo.xI -
-                findNextPoint(s, CurveSegmentIndex(getNumCurveSegments())));
-
-        unitForce_G[0] = r % t;
-        unitForce_G[1] = Vec3(t);
+        return m_TerminationBody;
     }
 
     const CableSubsystem& getSubsystem() const
@@ -752,6 +809,7 @@ private:
 
     Array_<CurveSegment, CurveSegmentIndex> m_CurveSegments{};
 
+    // TODO expose getters and setters.
     Real m_PathErrorBound = 1e-4;
     size_t m_PathMaxIter  = 50;
 
@@ -768,6 +826,9 @@ private:
 class CableSubsystem::Impl : public Subsystem::Guts
 {
 public:
+    /** This is a helper struct that is used by a CableSpan to compute the
+    position level cache entry.
+    After computing the position level cache, this data is discarded. */
     struct SolverData
     {
         SolverData(int nActive)
@@ -790,7 +851,7 @@ public:
         Vector pathCorrection;
         Vector pathError;
         Matrix mat;
-        // TODO Cholesky decomposition...
+        // TODO Cholesky decomposition would be more efficient.
         FactorLU matInv;
         Vector vec;
     };
@@ -801,6 +862,7 @@ public:
         SolverData& updOrInsert(int nActive)
         {
             if (nActive <= 0) {
+                // TODO use SimTK_ASSERT
                 throw std::runtime_error(
                     "Cannot produce solver data of zero dimension");
             }
@@ -819,10 +881,6 @@ public:
     {}
     ~Impl()
     {}
-    Impl* cloneImpl() const override
-    {
-        return new Impl(*this);
-    }
 
     int getNumPaths() const
     {
@@ -859,22 +917,6 @@ public:
         return getMultibodySystem().getMatterSubsystem();
     }
 
-    // Allocate state variables.
-    int realizeSubsystemTopologyImpl(State& state) const override
-    {
-        // Briefly allow writing into the Topology cache; after this the
-        // Topology cache is const.
-        Impl* wThis = const_cast<Impl*>(this);
-
-        wThis->realizeTopology(state);
-        for (CableSpanIndex ix(0); ix < cables.size(); ++ix) {
-            CableSpan& path = wThis->updCablePath(ix);
-            path.updImpl().realizeTopology(state);
-        }
-
-        return 0;
-    }
-
     void realizeTopology(State& state)
     {
         CacheEntry cache{};
@@ -888,6 +930,14 @@ public:
     CacheEntry& updCachedScratchboard(const State& state) const
     {
         return Value<CacheEntry>::updDowncast(updCacheEntry(state, m_CacheIx));
+    }
+
+    SimTK_DOWNCAST(Impl, Subsystem::Guts);
+
+private:
+    Impl* cloneImpl() const override
+    {
+        return new Impl(*this);
     }
 
     int calcDecorativeGeometryAndAppendImpl(
@@ -910,9 +960,22 @@ public:
         return 0;
     }
 
-    SimTK_DOWNCAST(Impl, Subsystem::Guts);
+    // Allocate state variables.
+    int realizeSubsystemTopologyImpl(State& state) const override
+    {
+        // Briefly allow writing into the Topology cache; after this the
+        // Topology cache is const.
+        Impl* wThis = const_cast<Impl*>(this);
 
-private:
+        wThis->realizeTopology(state);
+        for (CableSpanIndex ix(0); ix < cables.size(); ++ix) {
+            CableSpan& path = wThis->updCablePath(ix);
+            path.updImpl().realizeTopology(state);
+        }
+
+        return 0;
+    }
+
     // TOPOLOGY STATE
     Array_<CableSpan, CableSpanIndex> cables;
 
