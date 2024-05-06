@@ -56,7 +56,7 @@ public:
         Variation dK_Q{};
 
         std::vector<LocalGeodesicSample> samples;
-        double sHint = NaN;
+        Real sHint = NaN;
 
         Vec3 trackingPointOnLine{NaN, NaN, NaN};
         Status status = Status::Lifted;
@@ -604,6 +604,36 @@ public:
         return count + 2;
     }
 
+    Real calcCablePower(
+        const State& state, Real tension) const
+    {
+        SpatialVec unitForce;
+
+        Real unitPower = 0.;
+
+        {
+            calcUnitForceAtOrigin(state, unitForce);
+            SpatialVec v = m_OriginBody.getBodyVelocity(state);
+            unitPower += ~unitForce * v;
+        }
+
+        for (const CurveSegment& curve: m_CurveSegments) {
+            if (!curve.isActive(state)) {continue;}
+
+            curve.calcUnitForce(state, unitForce);
+            SpatialVec v = curve.getMobilizedBody().getBodyVelocity(state);
+            unitPower += ~unitForce * v;
+        }
+
+        {
+            calcUnitForceAtTermination(state, unitForce);
+            SpatialVec v = m_TerminationBody.getBodyVelocity(state);
+            unitPower += ~unitForce * v;
+        }
+
+        return unitPower * tension;
+    }
+
     void calcPathErrorJacobianUtility(
         const State& state,
         Vector& pathError,
@@ -620,9 +650,17 @@ private:
     void calcPosInfo(const State& s, PosInfo& posInfo) const;
     void calcVelInfo(const State& s, VelInfo& velInfo) const;
 
-    Vec3 findPrevPoint(const State& state, const CurveSegment& curve) const;
+    Vec3 findPrevPoint(const State& state, CurveSegmentIndex ix) const;
+    Vec3 findPrevPoint(const State& state, const CurveSegment& curve) const
+    {
+        return findPrevPoint(state, curve.getImpl().getIndex());
+    }
 
-    Vec3 findNextPoint(const State& state, const CurveSegment& curve) const;
+    Vec3 findNextPoint(const State& state, CurveSegmentIndex ix) const;
+    Vec3 findNextPoint(const State& state, const CurveSegment& curve) const
+    {
+        return findNextPoint(state, curve.getImpl().getIndex());
+    }
 
     const CurveSegment* findPrevActiveCurveSegment(
         const State& s,
@@ -652,9 +690,46 @@ private:
         Vec3 p_I,
         std::vector<LineSegment>& lines) const;
 
-    double calcPathLength(
+    Real calcPathLength(
         const State& state,
         const std::vector<LineSegment>& lines) const;
+
+    const Mobod& getOriginBody() const {return m_OriginBody;}
+    const Mobod& getTerminationBody() const {return m_TerminationBody;}
+
+    void calcUnitForceAtOrigin(const State& s, SpatialVec& unitForce_G) const
+    {
+        const PosInfo& posInfo = getPosInfo(s);
+        const Vec3& x_BG = getOriginBody().getBodyOriginLocation(s);
+
+        // Origin contact point moment arm in ground.
+        const Vec3& r = m_OriginPoint;
+
+        // Tangent direction at origin contact point in ground.
+        // TODO fix finding first active segment.
+        const UnitVec3& t = UnitVec3(findNextPoint(s, CurveSegmentIndex(-1)) - posInfo.xO);
+
+        unitForce_G[0] = - r % t;
+        unitForce_G[1] = - Vec3(t);
+    }
+
+    void calcUnitForceAtTermination(const State& s, SpatialVec& unitForce_G) const
+    {
+        const PosInfo& posInfo = getPosInfo(s);
+        const Vec3& x_BG = getTerminationBody().getBodyOriginLocation(s);
+
+        // Termination contact point moment arm in ground.
+        const Vec3& r = m_TerminationPoint;
+
+        // Tangent directions at termination contact point in ground.
+        // TODO fix finding last active segment.
+        const UnitVec3& t = UnitVec3(
+                posInfo.xI -
+                findNextPoint(s, CurveSegmentIndex(getNumCurveSegments())));
+
+        unitForce_G[0] = r % t;
+        unitForce_G[1] = Vec3(t);
+    }
 
     const CableSubsystem& getSubsystem() const
     {

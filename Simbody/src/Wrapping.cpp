@@ -176,7 +176,7 @@ int CableSpan::calcPoints(const State& state, std::vector<Vec3>& points_G, int n
 
 Real CableSpan::calcCablePower(const State& state, Real tension) const
 {
-    throw std::runtime_error("NOTYETIMPLEMENTED");
+    return getImpl().calcCablePower(state, tension);
 }
 
 //==============================================================================
@@ -1180,21 +1180,21 @@ const CurveSegment* CableSpan::Impl::findNextActiveCurveSegment(
     return nullptr;
 }
 
-Vec3 CableSpan::Impl::findPrevPoint(const State& s, const CurveSegment& curve)
+Vec3 CableSpan::Impl::findPrevPoint(const State& s, CurveSegmentIndex ix)
     const
 {
     const CurveSegment* segment =
-        findPrevActiveCurveSegment(s, curve.getImpl().getIndex());
+        findPrevActiveCurveSegment(s, ix);
     return segment ? segment->getImpl().calcFinalContactPoint(s)
                    : m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(
                          m_OriginPoint);
 }
 
-Vec3 CableSpan::Impl::findNextPoint(const State& s, const CurveSegment& curve)
+Vec3 CableSpan::Impl::findNextPoint(const State& s, CurveSegmentIndex ix)
     const
 {
     const CurveSegment* segment =
-        findNextActiveCurveSegment(s, curve.getImpl().getIndex());
+        findNextActiveCurveSegment(s, ix);
     return segment
                ? segment->getImpl().calcInitialContactPoint(s)
                : m_TerminationBody.getBodyTransform(s).shiftFrameStationToBase(
@@ -1598,12 +1598,19 @@ void CableSpan::Impl::applyBodyForces(
     Real tension,
     Vector_<SpatialVec>& bodyForcesInG) const
 {
-    realizePosition(s);
     if (tension < 0.) {
-        throw std::runtime_error("Cable tension can not go below zero.");
+        // TODO throw? or skip?
+        throw std::runtime_error("Cable tension should be nonnegative.");
     }
 
+    realizePosition(s);
     SpatialVec unitForce_G;
+
+    {
+        calcUnitForceAtOrigin(s, unitForce_G);
+        getOriginBody().applyBodyForce(s, unitForce_G * tension, bodyForcesInG);
+    }
+
     for (const CurveSegment& curve : m_CurveSegments) {
         if (!curve.isActive(s)) {
             return;
@@ -1611,6 +1618,11 @@ void CableSpan::Impl::applyBodyForces(
 
         curve.calcUnitForce(s, unitForce_G);
         curve.getMobilizedBody().applyBodyForce(s,  unitForce_G * tension, bodyForcesInG);
+    }
+
+    {
+        calcUnitForceAtTermination(s, unitForce_G);
+        getTerminationBody().applyBodyForce(s, unitForce_G * tension, bodyForcesInG);
     }
 }
 
