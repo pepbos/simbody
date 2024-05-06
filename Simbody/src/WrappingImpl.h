@@ -9,6 +9,7 @@
 #include "simbody/internal/Wrapping.h"
 #include "simbody/internal/common.h"
 #include "simmath/internal/ContactGeometry.h"
+#include <cmath>
 #include <functional>
 #include <stdexcept>
 
