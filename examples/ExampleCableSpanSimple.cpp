@@ -352,7 +352,7 @@ int main()
         path1.adoptWrappingObstacle(
             ball2,
             Transform(),
-            ContactGeometry::Ellipsoid({Rad2, Rad2 * 1.2, Rad2 * 0.9}),
+            ContactGeometry::Ellipsoid({Rad2, Rad2 * 2., Rad2 * 0.9}),
             /* ContactGeometry::Sphere(Rad2), */
             {0., 1., 0.});
 
@@ -390,7 +390,7 @@ int main()
 
             {
                 /* Random::Gaussian random; */
-                v += random.getValue() * 1e-2;
+                v += random.getValue() * 1e-3;
                 v = std::max(-1e-1, v);
                 v = std::min(1e-1, v);
             }
