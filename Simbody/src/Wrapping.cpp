@@ -326,10 +326,10 @@ bool calcNearestPointOnLineImplicitly(
     Vec3 b,
     Vec3& point,
     size_t maxIter,
-    double eps)
+    Real eps)
 {
     // Initial guess.
-    double alpha = calcPointOnLineNearPointAsFactor(a, b, point);
+    Real alpha = calcPointOnLineNearPointAsFactor(a, b, point);
     size_t iter  = 0;
 
     for (; iter < maxIter; ++iter) {
@@ -338,7 +338,7 @@ bool calcNearestPointOnLineImplicitly(
         const Vec3 pl = a + (b - a) * alpha;
 
         // Constraint evaluation at touchdown point.
-        const double c = calcSurfaceConstraintValue(geometry, pl);
+        const Real c = calcSurfaceConstraintValue(geometry, pl);
 
         // Break on touchdown, TODO or not?
         if (std::abs(c) < eps)
@@ -349,17 +349,17 @@ bool calcNearestPointOnLineImplicitly(
         const Mat33 H = calcSurfaceConstraintHessian(geometry, pl);
 
         // Add a weight to the newton step to avoid large steps.
-        constexpr double w = 0.5;
+        constexpr Real w = 0.5;
 
         // Update alpha.
-        const double step = dot(g, d) / (dot(d, H * d) + w);
+        const Real step = dot(g, d) / (dot(d, H * d) + w);
 
         // Stop when converged.
         if (std::abs(step) < eps)
             break;
 
         // Clamp the stepsize.
-        constexpr double maxStep = 0.25;
+        constexpr Real maxStep = 0.25;
         alpha -= std::min(std::max(-maxStep, step), maxStep);
 
         // Stop when leaving bounds.
