@@ -940,11 +940,16 @@ const Correction* calcPathCorrections(SolverData& data)
 
     data.mat = data.pathErrorJacobian.transpose() * data.pathErrorJacobian;
     for (int i = 0; i < data.mat.nrow(); ++i) {
-        data.mat[i][i] += w + 1e-3;
+        data.mat[i][i] += w + 1e-6;
     }
     data.matInv = data.mat;
     data.vec    = data.pathErrorJacobian.transpose() * (data.pathError * (-1.));
     data.matInv.solve(data.vec, data.pathCorrection);
+
+    data.err = data.mat * data.pathCorrection - data.vec;
+    if (data.err.normInf() > 1e-10) {
+        throw std::runtime_error("Failed to invert matrix");
+    }
 
     static_assert(
         sizeof(Correction) == sizeof(Real) * GeodesicDOF,

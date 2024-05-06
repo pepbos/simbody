@@ -810,8 +810,8 @@ private:
     Array_<CurveSegment, CurveSegmentIndex> m_CurveSegments{};
 
     // TODO expose getters and setters.
-    Real m_PathErrorBound = 1e-4;
-    size_t m_PathMaxIter  = 50;
+    Real m_PathErrorBound = 1e-6;
+    size_t m_PathMaxIter  = 2; // TODO set to something reasonable.
 
     // TOPOLOGY CACHE (set during realizeTopology())
     CacheEntryIndex m_PosInfoIx;
@@ -843,6 +843,7 @@ public:
             pathError         = Vector(C * n, 0.);
             mat               = Matrix(Q * n, Q * n, NaN);
             vec               = Vector(Q * n, NaN);
+            err               = Vector(Q * n, NaN);
         }
 
         std::vector<CableSpan::LineSegment> lineSegments;
@@ -854,6 +855,7 @@ public:
         // TODO Cholesky decomposition would be more efficient.
         FactorLU matInv;
         Vector vec;
+        Vector err;
     };
 
     struct CacheEntry
