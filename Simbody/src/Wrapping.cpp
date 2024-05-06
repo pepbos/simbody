@@ -100,13 +100,17 @@ Real CurveSegment::getInitialIntegratorStepSize(const State& state)
     return getImpl().getInstanceEntry(state).sHint;
 }
 
-void CurveSegment::calcUnitForce(const State& state, SpatialVec& unitForce_G) const
+void CurveSegment::calcUnitForce(const State& state, SpatialVec& unitForce_G)
+    const
 {
     getImpl().realizeCablePosition(state);
     getImpl().calcUnitForce(state, unitForce_G);
 }
 
-int CurveSegment::calcPoints(const State& state, std::vector<Vec3>& points_G, int nPoints) const
+int CurveSegment::calcPoints(
+    const State& state,
+    std::vector<Vec3>& points_G,
+    int nPoints) const
 {
     getImpl().realizeCablePosition(state);
     return getImpl().calcPathPoints(state, points_G, nPoints);
@@ -169,17 +173,24 @@ void CableSpan::applyBodyForces(
     return getImpl().applyBodyForces(s, tension, bodyForcesInG);
 }
 
-int CableSpan::calcPoints(const State& state, std::vector<Vec3>& points_G, int nPointsPerCurveSegment) const
+int CableSpan::calcPoints(
+    const State& state,
+    std::vector<Vec3>& points_G,
+    int nPointsPerCurveSegment) const
 {
     return getImpl().calcPathPoints(state, points_G, nPointsPerCurveSegment);
 }
 
-void CableSpan::calcUnitForceAtOrigin(const State& state, SpatialVec& unitForce_G) const
+void CableSpan::calcUnitForceAtOrigin(
+    const State& state,
+    SpatialVec& unitForce_G) const
 {
     getImpl().calcUnitForceAtOrigin(state, unitForce_G);
 }
 
-void CableSpan::calcUnitForceAtTermination(const State& state, SpatialVec& unitForce_G) const
+void CableSpan::calcUnitForceAtTermination(
+    const State& state,
+    SpatialVec& unitForce_G) const
 {
     getImpl().calcUnitForceAtTermination(state, unitForce_G);
 }
@@ -287,11 +298,13 @@ void calcSurfaceProjectionFast(
     }
 
     if (it >= maxIter) {
+        // TODO use SimTK_ASSERT
         throw std::runtime_error(
             "Surface projection failed: Reached max iterations");
     }
 
     if (std::abs(geometry.calcSurfaceValue(x)) > eps) {
+        // TODO use SimTK_ASSERT
         throw std::runtime_error(
             "Surface projection failed: no longer on surface");
     }
@@ -300,8 +313,10 @@ void calcSurfaceProjectionFast(
     t         = t - dot(n, t) * n;
     Real norm = t.norm();
     if (isNaN(norm))
+        // TODO use SimTK_ASSERT
         throw std::runtime_error("Surface projection failed: Detected NaN");
     if (norm < 1e-13)
+        // TODO use SimTK_ASSERT
         throw std::runtime_error("Surface projection failed: Tangent guess is "
                                  "parallel to surface normal");
 
@@ -318,10 +333,10 @@ bool calcNearestPointOnLineImplicitly(
 {
     // Initial guess.
     const Vec3 d = b - a;
-    Real alpha = -dot(d, a - point) / dot(d,d);
-    alpha = std::max(0., std::min(alpha, 1.));
+    Real alpha   = -dot(d, a - point) / dot(d, d);
+    alpha        = std::max(0., std::min(alpha, 1.));
 
-    size_t iter  = 0;
+    size_t iter = 0;
 
     for (; iter < maxIter; ++iter) {
         // Touchdown point on line.
@@ -366,10 +381,6 @@ bool calcNearestPointOnLineImplicitly(
 
     // TODO handle here?
     if (iter >= maxIter) {
-        std::cout << "a = " << a << "\n";
-        std::cout << "b = " << b << "\n";
-        std::cout << "p = " << point << "\n";
-        std::cout << "c = " << alpha << "\n";
         // TODO use SimTK_ASSERT
         throw std::runtime_error("Failed to compute point on line nearest "
                                  "surface: Reached max iterations");
@@ -548,6 +559,7 @@ RKM::Y RKM::stepTo(
         _e = std::max(_e, err);
 
         if (_h < _hMin) {
+            // TODO use SimTK_ASSERT
             throw std::runtime_error(
                 "Geodesic Integrator failed: Reached very small stepsize");
         }
@@ -557,6 +569,7 @@ RKM::Y RKM::stepTo(
         }
     }
     if (std::abs(x - x1) > 1e-13) {
+        // TODO use SimTK_ASSERT
         throw std::runtime_error("failed to integrate");
     }
     return _y.at(0);
@@ -643,6 +656,7 @@ Real calcGaussianCurvature(const ContactGeometry& geometry, Vec3 point)
     Mat33 adj     = calcAdjoint(calcSurfaceConstraintHessian(geometry, p));
 
     if (gDotg * gDotg < 1e-13) {
+        // TODO use SimTK_ASSERT
         throw std::runtime_error(
             "Gaussian curvature inaccurate: are we normal to surface?");
     }
@@ -745,112 +759,150 @@ void calcGeodesicAndVariationImplicitly(
 
 namespace
 {
-    Vec3 calcHermiteInterpolation(Real x0, const Vec3& y0, const Vec3& y0Dot, Real x1, const Vec3& y1, const Vec3& y1Dot, Real x)
-    {
-        const Real dx = x1 - x0;
-        const Vec3 dy = y1 - y0;
-        const Vec3 dyDot = y1Dot - y0Dot;
+Vec3 calcHermiteInterpolation(
+    Real x0,
+    const Vec3& y0,
+    const Vec3& y0Dot,
+    Real x1,
+    const Vec3& y1,
+    const Vec3& y1Dot,
+    Real x)
+{
+    const Real dx    = x1 - x0;
+    const Vec3 dy    = y1 - y0;
+    const Vec3 dyDot = y1Dot - y0Dot;
 
-        const Vec3& c0 = y0;
-        const Vec3& c1 = y0Dot;
-        const Vec3 c3 =
-            -2. * (dy - y0Dot * dx - 0.5 * dx * dyDot) / std::pow(dx, 3);
-        const Vec3 c2 = (dyDot / dx - 3. * c3 * dx) / 2.;
+    const Vec3& c0 = y0;
+    const Vec3& c1 = y0Dot;
+    const Vec3 c3 =
+        -2. * (dy - y0Dot * dx - 0.5 * dx * dyDot) / std::pow(dx, 3);
+    const Vec3 c2 = (dyDot / dx - 3. * c3 * dx) / 2.;
 
-        const Real h = x - x0;
-        return c0 + h * (c1 + h * (c2 + h * c3));
-    }
-
-    Vec3 calcHermiteInterpolation(const LocalGeodesicSample& a, const LocalGeodesicSample& b, Real l)
-    {
-        return calcHermiteInterpolation(
-                a.length, a.frame.p(), a.frame.R().getAxisUnitVec(TangentAxis),
-                b.length, b.frame.p(), b.frame.R().getAxisUnitVec(TangentAxis),
-                l);
-    }
-
-    size_t calcResampledGeodesicPoints(const std::vector<LocalGeodesicSample>& geodesic, const Transform& X_GS, int nSamples, std::vector<Vec3>& interpolatedSamples)
-    {
-        // Some sanity checks.
-        if (geodesic.empty()) {
-            throw std::runtime_error("Resampling of geodesic failed: Provided geodesic is empty.");
-        }
-        if (geodesic.front().length != 0.) {
-            throw std::runtime_error("Resampling of geodesic failed: First frame must be at length = zero");
-        }
-        if (geodesic.front().length < 0.) {
-            throw std::runtime_error("Resampling of geodesic failed: Last frame must be at length > zero");
-        }
-        if (nSamples == 1 && geodesic.size() != 1) {
-            throw std::runtime_error("Resampling of geodesic failed: Requested number of samples must be unequal to 1");
-        }
-
-        // Capture the start of the geodesic.
-        interpolatedSamples.push_back(
-                X_GS.shiftFrameStationToBase(geodesic.front().frame.p()));
-
-        // If there is but one sample in the geodesic, write that sample and exit.
-        if (geodesic.size() == 1) {
-            return 1;
-        }
-
-        // Seperate the interpolation points by equal length increments.
-        const Real dl = geodesic.back().length / static_cast<Real>(nSamples - 1);
-
-        // Compute the interpolated points from the geodesic.
-        auto itGeodesic = geodesic.begin();
-        // We can skip the first and last samples, because these are pushed
-        // manually before and after this loop respectively (we start at i=1
-        // and stop at i < nSamples-1).
-        for (size_t i = 1; i < nSamples-1; ++i) {
-
-            // Length at the current interpolation point.
-            const Real length = dl * static_cast<Real>(i);
-
-            // Find the two samples (lhs, rhs) of the geodesic such that the
-            // length of the interpolation point lies between them.
-            // i.e. find: lhs.length <= length < rhs.length
-            while(true) {
-                // Sanity check: We should stay within range.
-                if ((itGeodesic + 1) == geodesic.end()) {
-                    throw std::runtime_error("Resampling of geodesic failed: Attempted to read out of array range");
-                }
-
-                // The candidate samples to use for interpolation.
-                const LocalGeodesicSample& lhs = *itGeodesic;
-                const LocalGeodesicSample& rhs = *(itGeodesic + 1);
-
-                // Sanity check: Samples are assumed to be monotonically increasing in length.
-                if (lhs.length > rhs.length) {
-                    throw std::runtime_error("Resampling of geodesic failed: Samples are not monotonically increasing in length.");
-                }
-
-                // Check that the interpolation point lies between these samples: lhs.length <= length < rhs.length
-                if (length >= rhs.length) {
-                    // Try the next two samples.
-                    ++itGeodesic;
-                    continue;
-                }
-
-                // Do the interpolation, and write to the output buffer.
-                const Vec3 point_S = calcHermiteInterpolation(lhs, rhs, length);
-                // Transform to ground frame.
-                const Vec3 point_G  = X_GS.shiftFrameStationToBase(point_S);
-                // Write interpolated point to the output buffer.
-                interpolatedSamples.push_back(point_G);
-
-                break;
-            }
-        }
-
-        // Capture the last point of the geodesic.
-        interpolatedSamples.push_back(X_GS.shiftFrameStationToBase(geodesic.back().frame.p()));
-
-        return nSamples;
-    }
+    const Real h = x - x0;
+    return c0 + h * (c1 + h * (c2 + h * c3));
 }
 
-int CurveSegment::Impl::calcPathPoints(const State& s, std::vector<Vec3>& points, int nSamples) const
+Vec3 calcHermiteInterpolation(
+    const LocalGeodesicSample& a,
+    const LocalGeodesicSample& b,
+    Real l)
+{
+    return calcHermiteInterpolation(
+        a.length,
+        a.frame.p(),
+        a.frame.R().getAxisUnitVec(TangentAxis),
+        b.length,
+        b.frame.p(),
+        b.frame.R().getAxisUnitVec(TangentAxis),
+        l);
+}
+
+size_t calcResampledGeodesicPoints(
+    const std::vector<LocalGeodesicSample>& geodesic,
+    const Transform& X_GS,
+    int nSamples,
+    std::vector<Vec3>& interpolatedSamples)
+{
+    // Some sanity checks.
+    if (geodesic.empty()) {
+        // TODO use SimTK_ASSERT
+        throw std::runtime_error(
+            "Resampling of geodesic failed: Provided geodesic is empty.");
+    }
+    if (geodesic.front().length != 0.) {
+        // TODO use SimTK_ASSERT
+        throw std::runtime_error("Resampling of geodesic failed: First frame "
+                                 "must be at length = zero");
+    }
+    if (geodesic.front().length < 0.) {
+        // TODO use SimTK_ASSERT
+        throw std::runtime_error("Resampling of geodesic failed: Last frame "
+                                 "must be at length > zero");
+    }
+    if (nSamples == 1 && geodesic.size() != 1) {
+        // TODO use SimTK_ASSERT
+        throw std::runtime_error("Resampling of geodesic failed: Requested "
+                                 "number of samples must be unequal to 1");
+    }
+
+    // Capture the start of the geodesic.
+    interpolatedSamples.push_back(
+        X_GS.shiftFrameStationToBase(geodesic.front().frame.p()));
+
+    // If there is but one sample in the geodesic, write that sample and exit.
+    if (geodesic.size() == 1) {
+        return 1;
+    }
+
+    // Seperate the interpolation points by equal length increments.
+    const Real dl = geodesic.back().length / static_cast<Real>(nSamples - 1);
+
+    // Compute the interpolated points from the geodesic.
+    auto itGeodesic = geodesic.begin();
+    // We can skip the first and last samples, because these are pushed
+    // manually before and after this loop respectively (we start at i=1
+    // and stop at i < nSamples-1).
+    for (size_t i = 1; i < nSamples - 1; ++i) {
+
+        // Length at the current interpolation point.
+        const Real length = dl * static_cast<Real>(i);
+
+        // Find the two samples (lhs, rhs) of the geodesic such that the
+        // length of the interpolation point lies between them.
+        // i.e. find: lhs.length <= length < rhs.length
+        while (true) {
+            // Sanity check: We should stay within range.
+            if ((itGeodesic + 1) == geodesic.end()) {
+                // TODO use SimTK_ASSERT
+                throw std::runtime_error(
+                    "Resampling of geodesic failed: Attempted to read out of "
+                    "array range");
+            }
+
+            // The candidate samples to use for interpolation.
+            const LocalGeodesicSample& lhs = *itGeodesic;
+            const LocalGeodesicSample& rhs = *(itGeodesic + 1);
+
+            // Sanity check: Samples are assumed to be monotonically increasing
+            // in length.
+            if (lhs.length > rhs.length) {
+                // TODO use SimTK_ASSERT
+                throw std::runtime_error(
+                    "Resampling of geodesic failed: Samples are not "
+                    "monotonically increasing in length.");
+            }
+
+            // Check that the interpolation point lies between these samples:
+            // lhs.length <= length < rhs.length
+            if (length >= rhs.length) {
+                // Try the next two samples.
+                ++itGeodesic;
+                continue;
+            }
+
+            // Do the interpolation, and write to the output buffer.
+            const Vec3 point_S = calcHermiteInterpolation(lhs, rhs, length);
+            // Transform to ground frame.
+            const Vec3 point_G = X_GS.shiftFrameStationToBase(point_S);
+            // Write interpolated point to the output buffer.
+            interpolatedSamples.push_back(point_G);
+
+            break;
+        }
+    }
+
+    // Capture the last point of the geodesic.
+    interpolatedSamples.push_back(
+        X_GS.shiftFrameStationToBase(geodesic.back().frame.p()));
+
+    return nSamples;
+}
+} // namespace
+
+int CurveSegment::Impl::calcPathPoints(
+    const State& s,
+    std::vector<Vec3>& points,
+    int nSamples) const
 {
     const Transform& X_GS           = getPosInfo(s).X_GS;
     const InstanceEntry& geodesic_S = getInstanceEntry(s);
@@ -858,15 +910,21 @@ int CurveSegment::Impl::calcPathPoints(const State& s, std::vector<Vec3>& points
         return 0;
     }
 
-    // Do not do any resampling if nSamples==0, simply write the points from the integrator to the output buffer.
+    // Do not do any resampling if nSamples==0, simply write the points from the
+    // integrator to the output buffer.
     if (nSamples == 0) {
         for (const LocalGeodesicSample& sample : geodesic_S.samples) {
             points.push_back(X_GS.shiftFrameStationToBase(sample.frame.p()));
         }
     }
 
-    // Resample the points from the integrator by interpolating at equal intervals.
-    return calcResampledGeodesicPoints(geodesic_S.samples, X_GS, nSamples, points);
+    // Resample the points from the integrator by interpolating at equal
+    // intervals.
+    return calcResampledGeodesicPoints(
+        geodesic_S.samples,
+        X_GS,
+        nSamples,
+        points);
 }
 
 //==============================================================================
@@ -921,9 +979,11 @@ void CurveSegment::Impl::calcLiftoffIfNeeded(
 
     // For a zero-length curve, trigger liftoff when the prev and next points
     // lie above the surface plane.
-    if (dot(prevPoint_S - g.K_P.p(), g.K_P.R().getAxisUnitVec(NormalAxis)) <= 0. ||
-        dot(nextPoint_S - g.K_P.p(), g.K_P.R().getAxisUnitVec(NormalAxis)) <= 0.) {
-        // No liftoff.
+    if (dot(prevPoint_S - g.K_P.p(), g.K_P.R().getAxisUnitVec(NormalAxis)) <=
+            0. ||
+        dot(nextPoint_S - g.K_P.p(), g.K_P.R().getAxisUnitVec(NormalAxis)) <=
+            0.) {
+        // No Lifted.
         return;
     }
 
@@ -974,10 +1034,12 @@ void CurveSegment::Impl::assertSurfaceBounds(
 {
     // Make sure that the previous point does not lie inside the surface.
     if (calcSurfaceConstraintValue(m_Geometry, prevPoint_S) < 0.) {
+        // TODO use SimTK_ASSERT
         throw std::runtime_error("Unable to wrap over surface: Preceding point "
                                  "lies inside the surface");
     }
     if (calcSurfaceConstraintValue(m_Geometry, nextPoint_S) < 0.) {
+        // TODO use SimTK_ASSERT
         throw std::runtime_error(
             "Unable to wrap over surface: Next point lies inside the surface");
     }
@@ -1180,21 +1242,17 @@ const CurveSegment* CableSpan::Impl::findNextActiveCurveSegment(
     return nullptr;
 }
 
-Vec3 CableSpan::Impl::findPrevPoint(const State& s, CurveSegmentIndex ix)
-    const
+Vec3 CableSpan::Impl::findPrevPoint(const State& s, CurveSegmentIndex ix) const
 {
-    const CurveSegment* segment =
-        findPrevActiveCurveSegment(s, ix);
+    const CurveSegment* segment = findPrevActiveCurveSegment(s, ix);
     return segment ? segment->getImpl().calcFinalContactPoint(s)
                    : m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(
                          m_OriginPoint);
 }
 
-Vec3 CableSpan::Impl::findNextPoint(const State& s, CurveSegmentIndex ix)
-    const
+Vec3 CableSpan::Impl::findNextPoint(const State& s, CurveSegmentIndex ix) const
 {
-    const CurveSegment* segment =
-        findNextActiveCurveSegment(s, ix);
+    const CurveSegment* segment = findNextActiveCurveSegment(s, ix);
     return segment
                ? segment->getImpl().calcInitialContactPoint(s)
                : m_TerminationBody.getBodyTransform(s).shiftFrameStationToBase(
@@ -1210,7 +1268,7 @@ void CableSpan::Impl::calcPathErrorVector(
 {
     size_t lineIx = 0;
     ptrdiff_t row = -1;
-    pathError     *= 0;
+    pathError *= 0;
 
     for (const CurveSegment& segment : m_CurveSegments) {
         if (!segment.getImpl().getInstanceEntry(s).isActive()) {
@@ -1239,7 +1297,7 @@ void CableSpan::Impl::calcPathErrorJacobian(
 
     // TODO perhaps just not make method static.
     const size_t n = lines.size() - 1;
-    J              *= 0.;
+    J *= 0.;
 
     SimTK_ASSERT(
         J.rows() == n * N,
@@ -1383,6 +1441,7 @@ void CableSpan::Impl::applyCorrection(const State& s, const Vector& c) const
 {
     const size_t nActive = countActive(s);
     if (nActive * GeodesicDOF != c.size()) {
+        // TODO use SimTK_ASSERT
         throw std::runtime_error("invalid size of corrections vector");
     }
 
@@ -1536,15 +1595,14 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
         }
     }
 
+    // TODO use SimTK_ASSERT
     throw std::runtime_error("Failed to converge");
 }
 
 void CableSpan::Impl::calcVelInfo(const State& s, VelInfo& velInfo) const
 {
-    auto CalcPointVelocityInGround = [&](
-            const MobilizedBody& mobod,
-            const Vec3& point_G) -> Vec3
-    {
+    auto CalcPointVelocityInGround = [&](const MobilizedBody& mobod,
+                                         const Vec3& point_G) -> Vec3 {
         // Not using MobilizedBody::findStationVelocityInGround because the
         // point_G is in ground frame. The following computation is the same
         // though (minus transforming the point to the ground frame).
@@ -1570,13 +1628,13 @@ void CableSpan::Impl::calcVelInfo(const State& s, VelInfo& velInfo) const
         const MobilizedBody& mobod = curve.getImpl().getMobilizedBody();
         // TODO odd name: "g"
         const CurveSegment::Impl::PosInfo& g = curve.getImpl().getPosInfo(s);
-        const UnitVec3 e_G    = g.KP.R().getAxisUnitVec(TangentAxis);
+        const UnitVec3 e_G = g.KP.R().getAxisUnitVec(TangentAxis);
 
         const Vec3 v_GP = CalcPointVelocityInGround(mobod, g.KP.p());
 
         lengthDot += dot(e_G, v_GP - v_GQ);
 
-        v_GQ       = CalcPointVelocityInGround(mobod, g.KQ.p());
+        v_GQ = CalcPointVelocityInGround(mobod, g.KQ.p());
 
         lastActive = &curve;
     }
@@ -1617,12 +1675,18 @@ void CableSpan::Impl::applyBodyForces(
         }
 
         curve.calcUnitForce(s, unitForce_G);
-        curve.getMobilizedBody().applyBodyForce(s,  unitForce_G * tension, bodyForcesInG);
+        curve.getMobilizedBody().applyBodyForce(
+            s,
+            unitForce_G * tension,
+            bodyForcesInG);
     }
 
     {
         calcUnitForceAtTermination(s, unitForce_G);
-        getTerminationBody().applyBodyForce(s, unitForce_G * tension, bodyForcesInG);
+        getTerminationBody().applyBodyForce(
+            s,
+            unitForce_G * tension,
+            bodyForcesInG);
     }
 }
 
