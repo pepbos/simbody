@@ -97,7 +97,7 @@ int CurveSegment::getNumberOfIntegratorStepsTaken(const State& state)
 Real CurveSegment::getInitialIntegratorStepSize(const State& state)
 {
     getImpl().realizeCablePosition(state);
-    throw std::runtime_error("NOTYETIMPLEMENTED");
+    return getImpl().getInstanceEntry(state).sHint;
 }
 
 void CurveSegment::calcUnitForce(const State& state, SpatialVec& unitForce_G) const
