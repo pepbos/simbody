@@ -1073,16 +1073,40 @@ void CurveSegment::Impl::shootNewGeodesic(
         m_ProjectionAccuracy,
         cache.samples);
 
-    cache.curvatures_P = {
-        calcNormalCurvature(m_Geometry, cache.K_P.p(), cache.K_P.R().getAxisUnitVec(TangentAxis)),
-        calcNormalCurvature(m_Geometry, cache.K_P.p(), cache.K_P.R().getAxisUnitVec(BinormalAxis)),
-    };
-    cache.curvatures_Q = {
-        calcNormalCurvature(m_Geometry, cache.K_Q.p(), cache.K_Q.R().getAxisUnitVec(TangentAxis)),
-        calcNormalCurvature(m_Geometry, cache.K_Q.p(), cache.K_Q.R().getAxisUnitVec(BinormalAxis)),
+    cache.length = l;
+}
+
+Real CurveSegment::Impl::calcMaxCorrectionStepSize(const State& s, const Correction& c) const
+{
+    Real maxStepSize = 1.;
+
+    const Real angle = m_MaxCorrectionStepDeg / 180. * M_PI;
+
+    const InstanceEntry& cache = getInstanceEntry(s);
+
+    auto UpdateMaxStepSize = [&](
+            const FrenetFrame& K,
+            const Variation& dK,
+            CoordinateAxis axis)
+    {
+        const UnitVec3& a = cache.K_P.R().getAxisUnitVec(axis);
+
+        const Vec4 dx = ~dK[1] * a;
+        const Real maxDisplacementEstimate = dot(abs(dx), abs(c));
+        const Real curvature = calcNormalCurvature(getContactGeometry(), K.p(), a);
+        const Real maxAllowedDisplacement = std::abs(angle / curvature);
+        if (std::abs(maxDisplacementEstimate) > maxAllowedDisplacement) {
+            const Real s = std::abs(maxAllowedDisplacement / maxDisplacementEstimate);
+            maxStepSize = s < maxStepSize ? s : maxStepSize;
+        }
     };
 
-    cache.length = l;
+    UpdateMaxStepSize(cache.K_P, cache.dK_P, TangentAxis);
+    UpdateMaxStepSize(cache.K_P, cache.dK_P, BinormalAxis);
+    UpdateMaxStepSize(cache.K_Q, cache.dK_Q, TangentAxis);
+    UpdateMaxStepSize(cache.K_Q, cache.dK_Q, BinormalAxis);
+
+    return maxStepSize;
 }
 
 //==============================================================================
@@ -1610,7 +1634,7 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
             if (!curve.getImpl().getInstanceEntry(s).isActive()) {
                 continue;
             }
-            Real cScale = curve.getImpl().calcCorrectionScale(s, *(corrIt + offset));
+            Real cScale = curve.getImpl().calcMaxCorrectionStepSize(s, *(corrIt + offset));
             scale = cScale < scale ? cScale : scale;
         }
         if (scale != 1.) {

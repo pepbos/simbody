@@ -69,9 +69,6 @@ public:
         Variation prev_dK_Q;
         Correction prev_correction;
         Status prev_status = Status::Disabled;
-
-        std::array<Real,2> curvatures_P {NaN, NaN};
-        std::array<Real,2> curvatures_Q {NaN, NaN};
     };
 
     // Position level cache: Curve in ground frame.
@@ -309,33 +306,7 @@ public:
         unitForce_G[1] = t_Q - t_P;
     }
 
-    Real calcCorrectionScale(const State& s, const Correction& c) const
-    {
-        const InstanceEntry& cache = getInstanceEntry(s);
-        Real scale = 1.;
-        constexpr Real smallAngle = 5. / 180. * M_PI;
-
-        auto UpdateScale = [&](Real curvature, Real tryStep) {
-            const Real maxStep = std::abs(smallAngle / curvature);
-            if (std::abs(tryStep) > maxStep) {
-                const Real s = std::abs(maxStep / tryStep);
-                scale = s < scale ? s : scale;
-            }
-        };
-
-        UpdateScale(cache.curvatures_P.at(0), c[0]);
-        UpdateScale(cache.curvatures_P.at(1), c[1]);
-
-        for (int r = 0; r < 2; ++r) {
-            Real tryStep = 0;
-            for (int i = 0; i < 4; ++i) {
-                tryStep += std::abs(cache.dK_Q[1].row(r)[i] * c[i]);
-            }
-            UpdateScale(cache.curvatures_Q.at(r), tryStep);
-        }
-
-        return scale;
-    }
+    Real calcMaxCorrectionStepSize(const State& s, const Correction& c) const;
 
     // TODO Below code should be moved to a unit test.
     void assertLastCorrection(const State& s) const
@@ -385,8 +356,7 @@ public:
         auto AssertFrame = [&](
                 const Transform& K0,
                 const Transform& K1,
-                const Variation& dK,
-                const std::array<Real, 2>& curvatures) -> bool {
+                const Variation& dK) -> bool {
 
             const Vec3 got_diff = K1.p() - K0.p();
             const Vec3 exp_diff = dK[1] * c;
@@ -398,16 +368,6 @@ public:
                     << ".norm() = " << delta << "\n";
                 oss << "    x0 = " << K0.p() << "\n";
                 oss << "    x1 = " << K1.p() << "\n";
-                oss << "    maxStep = " <<
-                    std::abs(smallAngle / curvatures.at(0))
-                    << ", " <<
-                    std::abs(smallAngle / curvatures.at(1))
-                    << "\n";
-                oss << "    gotStep = " <<
-                    (K0.R().transpose() * got_diff)[0]
-                    << ", " <<
-                    (K0.R().transpose() * got_diff)[2]
-                    << "\n";
                 oss << "    expected dx_Q = "
                     << K0.R().transpose() * exp_diff / delta
                     << "\n";
@@ -436,8 +396,8 @@ public:
         };
 
         if (delta > 1e-10) {
-            const bool assertStart = !AssertFrame(cache.prev_K_P, cache.K_P, cache.prev_dK_P, cache.curvatures_P);
-            const bool assertEnd = !AssertFrame(cache.prev_K_Q, cache.K_Q, cache.prev_dK_Q, cache.curvatures_Q);
+            const bool assertStart = !AssertFrame(cache.prev_K_P, cache.K_P, cache.prev_dK_P);
+            const bool assertEnd = !AssertFrame(cache.prev_K_Q, cache.K_Q, cache.prev_dK_Q);
             if (assertStart || assertEnd) {
                 // TODO use SimTK_ASSERT
                 throw std::runtime_error("FAILED GEODESIC CORRECTION TEST");
@@ -621,6 +581,8 @@ private:
     // TODO expose getters and setters.
     Real m_TouchdownAccuracy = 1e-4; // TODO set to reasonable value
     size_t m_TouchdownIter   = 50; // TODO set to reasonable value
+
+    Real m_MaxCorrectionStepDeg = 10.;
 };
 
 //==============================================================================
