@@ -858,7 +858,7 @@ private:
     size_t m_PathMaxIter  = 50; // TODO set to something reasonable.
 
     // For each curve segment the max allowed radial curvature.
-    Real m_MaxCorrectionStepDeg = 5.; // TODO describe
+    Real m_MaxCorrectionStepDeg = 20.; // TODO describe
     Real m_PathPredErrBound = 0.05; // TODO describe.
 
     // TOPOLOGY CACHE (set during realizeTopology())
