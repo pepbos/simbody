@@ -946,38 +946,25 @@ void calcPathCorrections(SolverData& data)
     data.vec    = data.pathErrorJacobian.transpose() * (data.pathError * (-1.));
     data.matInv.solve(data.vec, data.pathCorrection);
 
-    data.err = data.mat * data.pathCorrection - data.vec;
-    if (data.err.normInf() > 1e-10) {
-        throw std::runtime_error("Failed to invert matrix");
+    data.solverError = data.mat * data.pathCorrection - data.vec;
+    if (data.solverError.normInf() > 1e-10) {
+        // TODO use warning channel or exception?
+        std::cout << "WARNING: Failed to invert matrix: This is bad.\n";
     }
 }
 
 Real calcMaxRelativeDeviationFromLinear(SolverData& data)
 {
-    data.err =
+    data.localLinearityError =
         data.pathErrorJacobian * data.pathCorrection + data.prevPathError;
-    if (data.err.nrow() != data.pathError.nrow()) {
+    if (data.localLinearityError.nrow() != data.pathError.nrow()) {
         throw std::runtime_error("Incompatible vector sizes");
     }
-    const Real err       = (data.err - data.pathError).norm();
-    const Real maxRelErr = err / data.pathCorrectionNorm;
-    return maxRelErr;
-}
-
-const Vec4* getPathError(SolverData& data)
-{
-    SimTK_ASSERT(
-        data.pathError.size() * sizeof(Real) == n * sizeof(Vec4),
-        "Invalid size of path error vector");
-    return reinterpret_cast<const Vec4*>(&data.pathError[0]);
-}
-
-const Vec4* getPredictedPathError(SolverData& data)
-{
-    SimTK_ASSERT(
-        data.err.size() * sizeof(Real) == n * sizeof(Vec4),
-        "Invalid size of path error vector");
-    return reinterpret_cast<const Vec4*>(&data.err[0]);
+    const Real deviationFromLinear =
+        (data.localLinearityError - data.pathError).norm();
+    const Real maxRelativeDeviation =
+        deviationFromLinear / data.pathCorrectionNorm;
+    return maxRelativeDeviation;
 }
 
 const Correction* getPathCorrections(SolverData& data)
@@ -1750,6 +1737,7 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
             const Real cNorm =
                 (data.pathCorrectionNorm = data.pathCorrection.norm());
             if (cNorm < 1e-10) {
+                // TODO use proper warning channel.
                 std::cout << "WARNING: Local minimum found\n";
                 break;
             }

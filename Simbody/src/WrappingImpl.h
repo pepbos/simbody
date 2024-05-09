@@ -892,7 +892,8 @@ public:
             prevPathError     = Vector(C * n, NaN);
             mat               = Matrix(Q * n, Q * n, NaN);
             vec               = Vector(Q * n, NaN);
-            err               = Vector(Q * n, NaN);
+            solverError       = Vector(Q * n, NaN);
+            localLinearityError               = Vector(Q * n, NaN);
         }
 
         std::vector<CableSpan::LineSegment> lineSegments;
@@ -905,7 +906,8 @@ public:
         // TODO Cholesky decomposition would be more efficient.
         FactorLU matInv;
         Vector vec;
-        Vector err;
+        Vector solverError;
+        Vector localLinearityError;
         Real pathCorrectionNorm = NaN;
     };
 
