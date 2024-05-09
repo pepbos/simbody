@@ -934,7 +934,7 @@ int CurveSegment::Impl::calcPathPoints(
 namespace
 {
 
-const Correction* calcPathCorrections(SolverData& data)
+void calcPathCorrections(SolverData& data)
 {
     Real w = data.pathError.normInf();
 
@@ -950,7 +950,38 @@ const Correction* calcPathCorrections(SolverData& data)
     if (data.err.normInf() > 1e-10) {
         throw std::runtime_error("Failed to invert matrix");
     }
+}
 
+Real calcMaxRelativeDeviationFromLinear(SolverData& data)
+{
+    data.err =
+        data.pathErrorJacobian * data.pathCorrection + data.prevPathError;
+    if (data.err.nrow() != data.pathError.nrow()) {
+        throw std::runtime_error("Incompatible vector sizes");
+    }
+    const Real err       = (data.err - data.pathError).norm();
+    const Real maxRelErr = err / data.pathCorrectionNorm;
+    return maxRelErr;
+}
+
+const Vec4* getPathError(SolverData& data)
+{
+    SimTK_ASSERT(
+        data.pathError.size() * sizeof(Real) == n * sizeof(Vec4),
+        "Invalid size of path error vector");
+    return reinterpret_cast<const Vec4*>(&data.pathError[0]);
+}
+
+const Vec4* getPredictedPathError(SolverData& data)
+{
+    SimTK_ASSERT(
+        data.err.size() * sizeof(Real) == n * sizeof(Vec4),
+        "Invalid size of path error vector");
+    return reinterpret_cast<const Vec4*>(&data.err[0]);
+}
+
+const Correction* getPathCorrections(SolverData& data)
+{
     static_assert(
         sizeof(Correction) == sizeof(Real) * GeodesicDOF,
         "Invalid size of corrections vector");
@@ -1076,37 +1107,36 @@ void CurveSegment::Impl::shootNewGeodesic(
     cache.length = l;
 }
 
-Real CurveSegment::Impl::calcMaxCorrectionStepSize(const State& s, const Correction& c) const
+void CurveSegment::Impl::calcMaxCorrectionStepSize(
+    const State& s,
+    const Correction& c,
+    Real maxCorrectionStepDeg,
+    Real& maxStepSize) const
 {
-    Real maxStepSize = 1.;
-
-    const Real angle = m_MaxCorrectionStepDeg / 180. * M_PI;
+    const Real angle = maxCorrectionStepDeg / 180. * M_PI;
 
     const InstanceEntry& cache = getInstanceEntry(s);
 
-    auto UpdateMaxStepSize = [&](
-            const FrenetFrame& K,
-            const Variation& dK,
-            CoordinateAxis axis)
-    {
-        const UnitVec3& a = cache.K_P.R().getAxisUnitVec(axis);
+    auto UpdateMaxStepSize =
+        [&](const FrenetFrame& K, const Variation& dK, CoordinateAxis axis) {
+            const UnitVec3& a = cache.K_P.R().getAxisUnitVec(axis);
 
-        const Vec4 dx = ~dK[1] * a;
-        const Real maxDisplacementEstimate = dot(abs(dx), abs(c));
-        const Real curvature = calcNormalCurvature(getContactGeometry(), K.p(), a);
-        const Real maxAllowedDisplacement = std::abs(angle / curvature);
-        if (std::abs(maxDisplacementEstimate) > maxAllowedDisplacement) {
-            const Real s = std::abs(maxAllowedDisplacement / maxDisplacementEstimate);
-            maxStepSize = s < maxStepSize ? s : maxStepSize;
-        }
-    };
+            const Vec4 dx                      = ~dK[1] * a;
+            const Real maxDisplacementEstimate = dot(abs(dx), abs(c));
+            const Real curvature =
+                calcNormalCurvature(getContactGeometry(), K.p(), a);
+            const Real maxAllowedDisplacement = std::abs(angle / curvature);
+            if (std::abs(maxDisplacementEstimate) > maxAllowedDisplacement) {
+                const Real s =
+                    std::abs(maxAllowedDisplacement / maxDisplacementEstimate);
+                maxStepSize = s < maxStepSize ? s : maxStepSize;
+            }
+        };
 
     UpdateMaxStepSize(cache.K_P, cache.dK_P, TangentAxis);
     UpdateMaxStepSize(cache.K_P, cache.dK_P, BinormalAxis);
     UpdateMaxStepSize(cache.K_Q, cache.dK_Q, TangentAxis);
     UpdateMaxStepSize(cache.K_Q, cache.dK_Q, BinormalAxis);
-
-    return maxStepSize;
 }
 
 //==============================================================================
@@ -1421,7 +1451,7 @@ Real CableSpan::Impl::calcCableLength(
     return lTot;
 }
 
-void CableSpan::Impl::calcLineSegments(
+Real CableSpan::Impl::calcLineSegments(
     const State& s,
     Vec3 p_O,
     Vec3 p_I,
@@ -1430,19 +1460,25 @@ void CableSpan::Impl::calcLineSegments(
     lines.resize(m_CurveSegments.size() + 1);
     lines.clear();
 
-    Vec3 lineStart = std::move(p_O);
-    for (const CurveSegment& segment : m_CurveSegments) {
-        if (!segment.getImpl().getInstanceEntry(s).isActive()) {
+    Real totalCableLength = 0.;
+    Vec3 lineStart        = std::move(p_O);
+    for (const CurveSegment& curve : m_CurveSegments) {
+        const CurveSegment::Impl& c = curve.getImpl();
+        if (!c.getInstanceEntry(s).isActive()) {
             continue;
         }
 
-        const GeodesicInfo& g = segment.getImpl().getPosInfo(s);
+        totalCableLength += c.getInstanceEntry(s).length;
+
+        const GeodesicInfo& g = curve.getImpl().getPosInfo(s);
         const Vec3 lineEnd    = g.KP.p();
         lines.push_back(LineSegment(lineStart, lineEnd));
+        totalCableLength += lines.back().l;
 
         lineStart = g.KQ.p();
     }
     lines.emplace_back(lineStart, p_I);
+    return totalCableLength;
 }
 
 size_t CableSpan::countActive(const State& s) const
@@ -1555,6 +1591,20 @@ void CableSpan::Impl::calcPathErrorJacobianUtility(
     J = data.pathErrorJacobian;
 }
 
+void CableSpan::Impl::callForEachActiveCurveSegment(
+    const State& s,
+    std::function<void(const CurveSegment::Impl&)> f) const
+{
+    for (const CurveSegment& curve : m_CurveSegments) {
+        // Skip non-active segments.
+        if (!curve.getImpl().getInstanceEntry(s).isActive()) {
+            continue;
+        }
+        // Call provided function for active segments.
+        f(curve.getImpl());
+    }
+}
+
 void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 {
     // Path origin and termination point.
@@ -1570,7 +1620,8 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
     // Axes considered when computing the path error.
     const std::array<CoordinateAxis, 2> axes{NormalAxis, BinormalAxis};
 
-    posInfo.loopIter = 0;
+    posInfo.loopIter  = 0;
+    Real safetyFactor = 1.;
     while (true) {
         // Make sure all curve segments are realized to position stage.
         // This will transform all last computed geodesics to Ground frame, and
@@ -1592,27 +1643,76 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
             break;
         }
 
-        // Grab the shared data cache for helping with computing the path corrections.
-        // This data is only used as an intermediate variable, and will be
-        // discarded after each iteration.
+        // Grab the shared data cache for helping with computing the path
+        // corrections. This data is only used as an intermediate variable, and
+        // will be discarded after each iteration.
         SolverData& data =
             getSubsystem().getImpl().updCachedScratchboard(s).updOrInsert(
                 nActive);
 
-        // Compute the straight-line segments of this cable span. Note that
-        // there is one more straight line segment, than there are active curve
-        // segments.
-        calcLineSegments(s, x_O, x_I, data.lineSegments);
+        // Compute the straight-line segments of this cable span, and set the
+        // total length. Note that there is one more straight line segment,
+        // than there are active curve segments.
+        posInfo.l = calcLineSegments(s, x_O, x_I, data.lineSegments);
 
-        // Evaluate path error as the misalignment of the straight line
-        // segments with the curve segment's tangent vectors at the contact
-        // points.
+        // Because of the nonlinearity of the system, it is hard to predict the
+        // step size for which the path error behaves locally linear.
+        // We can compare the previous path error to the current one, and see if
+        // it matches what we would expect given the previous jacobian and
+        // applied correction. If there is a large deviation, we will try a
+        // smaller step next time. First determine if we can do the comparison
+        // at all:
+        bool evaluateCorrectionEffect = false;
+        {
+            // We need to have completed atleast one iteration to see the
+            // effect of the applied correction.
+            bool evaluateCorrectionEffect = posInfo.loopIter > 0;
+
+            // We must check that there was no change in the wrapping status of
+            // each of the obstacles, otherwise the jacobian will not predict
+            // the change in path error.
+            for (const CurveSegment& curve : m_CurveSegments) {
+                evaluateCorrectionEffect &=
+                    curve.getImpl().getInstanceEntry(s).status ==
+                    curve.getImpl().getInstanceEntry(s).prev_status;
+            }
+
+            // Store the previous path error for the evaluation.
+            if (evaluateCorrectionEffect) {
+                data.prevPathError = data.pathError;
+            }
+        }
+
+        // Evaluate the current path error as the misalignment of the straight
+        // line segments with the curve segment's tangent vectors at the
+        // contact points.
         calcPathErrorVector<2>(s, data.lineSegments, axes, data.pathError);
         const Real maxPathError = data.pathError.normInf();
 
-        // Stop iterating if max path error is small, or max iterations is reached.
-        if (maxPathError < m_PathErrorBound || posInfo.loopIter >= m_PathMaxIter) {
-            posInfo.l = calcCableLength(s, data.lineSegments);
+        // Evaluate local linearity of the path error.
+        if (evaluateCorrectionEffect) {
+            // Compute the deviation from the expected path error. If the
+            // deviation was too large, use the safetyFactor to enfore a
+            // smaller step the next time.
+            if (calcMaxRelativeDeviationFromLinear(data) > m_PathPredErrBound) {
+                safetyFactor /= 2.;
+                std::cout << "SAFETY FACTOR = " << safetyFactor << "\n";
+            }
+
+            // We should see the deviation vanish for smaller and smaller
+            // correction steps. If not, there might be a bug in computing the
+            // errors or the jacobian.
+            if (!(safetyFactor > 1e-3)) {
+                throw std::runtime_error(
+                    "Deviation of the path error from its linear approximation "
+                    "did not vanish for small correction.");
+            }
+        }
+
+        // Stop iterating if max path error is small, or max iterations has been
+        // reached.
+        if (maxPathError < m_PathErrorBound ||
+            posInfo.loopIter >= m_PathMaxIter) {
             break;
         }
 
@@ -1624,43 +1724,53 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
             axes,
             data.pathErrorJacobian);
 
-        // Compute the geodesic corrections for each curve segment.
-        const Correction* corrIt = calcPathCorrections(data);
+        // Compute the geodesic corrections for each curve segment: This gives
+        // us a correction vector in a direction that lowers the path error.
+        calcPathCorrections(data);
 
-        // TODO verify effectiveness of scaling.
-        Real scale = 1.;
-        size_t offset = 0;
-        for (const CurveSegment& curve : m_CurveSegments) {
-            if (!curve.getImpl().getInstanceEntry(s).isActive()) {
-                continue;
+        // Compute the step size that we take along the correction vector.
+        Real stepSize            = 1.;
+        const Correction* corrIt = getPathCorrections(data);
+        callForEachActiveCurveSegment(s, [&](const CurveSegment::Impl& curve) {
+            // Compute the max allowed stepsize for each active segment.
+            curve.calcMaxCorrectionStepSize(
+                s,
+                *corrIt,
+                m_MaxCorrectionStepDeg,
+                stepSize);
+            ++corrIt;
+        });
+
+        // Compute the correction with the proper step size.
+        data.pathCorrection *= stepSize * safetyFactor;
+
+        // If the applied correction converges to zero before the path error
+        // converges to zero, unfortunately, there is nothing more to do.
+        {
+            const Real cNorm =
+                (data.pathCorrectionNorm = data.pathCorrection.norm());
+            if (cNorm < 1e-10) {
+                std::cout << "WARNING: Local minimum found\n";
+                break;
             }
-            Real cScale = curve.getImpl().calcMaxCorrectionStepSize(s, *(corrIt + offset));
-            scale = cScale < scale ? cScale : scale;
-        }
-        if (scale != 1.) {
-            // TODO remove this debug printing.
-            std::cout << "Applied scale = " << scale << "\n";
         }
 
         // Apply corrections to the curve segments.
-        for (const CurveSegment& curve : m_CurveSegments) {
-            // The corrections were computed for the active segments: Skip any
-            // non-active here.
-            if (!curve.getImpl().getInstanceEntry(s).isActive()) {
-                continue;
-            }
-            curve.getImpl().applyGeodesicCorrection(s, (*corrIt) * scale);
+        corrIt = getPathCorrections(data);
+        callForEachActiveCurveSegment(s, [&](const CurveSegment::Impl& curve) {
+            curve.applyGeodesicCorrection(s, *corrIt);
             ++corrIt;
-        }
+        });
 
-        // Applying the corrections changes the path: invalidate each segment's
-        // cache.
+        // The applied corrections have changed the path: invalidate each
+        // segment's cache.
         for (const CurveSegment& curve : m_CurveSegments) {
-            // Also invalidate non-active segments: They might touchdown again.
+            // Also invalidate non-active segments: They might touchdown
+            // again.
             curve.getImpl().invalidatePosEntry(s);
         }
 
-         ++posInfo.loopIter;
+        ++posInfo.loopIter;
     }
 
     // TODO throw?

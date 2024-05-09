@@ -306,7 +306,7 @@ public:
         unitForce_G[1] = t_Q - t_P;
     }
 
-    Real calcMaxCorrectionStepSize(const State& s, const Correction& c) const;
+    void calcMaxCorrectionStepSize(const State& s, const Correction& c, Real maxCorrectionStepDeg, Real& maxStepSize) const;
 
     // TODO Below code should be moved to a unit test.
     void assertLastCorrection(const State& s) const
@@ -421,6 +421,7 @@ public:
             cache.prev_dK_P = cache.dK_P;
             cache.prev_dK_Q = cache.dK_Q;
             cache.prev_correction = c;
+            cache.prev_status = cache.status;
         }
 
         // Get the previous geodesic.
@@ -452,6 +453,10 @@ public:
         getSubsystem().markDiscreteVarUpdateValueRealized(s, m_InstanceIx);
 
         invalidatePosEntry(s);
+    }
+
+    Status getPrevStatus(const State& s) const {
+        return getInstanceEntry(s).prev_status;
     }
 
     Vec3 calcInitialContactPoint(const State& s) const
@@ -581,8 +586,6 @@ private:
     // TODO expose getters and setters.
     Real m_TouchdownAccuracy = 1e-4; // TODO set to reasonable value
     size_t m_TouchdownIter   = 50; // TODO set to reasonable value
-
-    Real m_MaxCorrectionStepDeg = 10.;
 };
 
 //==============================================================================
@@ -808,7 +811,7 @@ private:
         Matrix& J) const;
 
     // Make static or not?
-    void calcLineSegments(
+    Real calcLineSegments(
         const State& s,
         Vec3 p_O,
         Vec3 p_I,
@@ -837,6 +840,8 @@ private:
         return *m_Subsystem;
     }
 
+    void callForEachActiveCurveSegment(const State& s, std::function<void(const CurveSegment::Impl&)> f) const;
+
     // Reference back to the subsystem.
     CableSubsystem* m_Subsystem; // TODO just a pointer?
 
@@ -850,7 +855,11 @@ private:
 
     // TODO expose getters and setters.
     Real m_PathErrorBound = 1e-6;
-    size_t m_PathMaxIter  = 2; // TODO set to something reasonable.
+    size_t m_PathMaxIter  = 50; // TODO set to something reasonable.
+
+    // For each curve segment the max allowed radial curvature.
+    Real m_MaxCorrectionStepDeg = 5.; // TODO describe
+    Real m_PathPredErrBound = 0.05; // TODO describe.
 
     // TOPOLOGY CACHE (set during realizeTopology())
     CacheEntryIndex m_PosInfoIx;
@@ -880,6 +889,7 @@ public:
             pathErrorJacobian = Matrix(C * n, Q * n, 0.);
             pathCorrection    = Vector(Q * n, 0.);
             pathError         = Vector(C * n, 0.);
+            prevPathError     = Vector(C * n, NaN);
             mat               = Matrix(Q * n, Q * n, NaN);
             vec               = Vector(Q * n, NaN);
             err               = Vector(Q * n, NaN);
@@ -890,11 +900,13 @@ public:
         Matrix pathErrorJacobian;
         Vector pathCorrection;
         Vector pathError;
+        Vector prevPathError;
         Matrix mat;
         // TODO Cholesky decomposition would be more efficient.
         FactorLU matInv;
         Vector vec;
         Vector err;
+        Real pathCorrectionNorm = NaN;
     };
 
     struct CacheEntry
