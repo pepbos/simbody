@@ -1565,7 +1565,7 @@ void CableSpan::Impl::calcPathErrorJacobianUtility(
         return;
     }
 
-    // Grab the shared data cache for computing the matrices, and lock it.
+    // Grab the shared data cache for computing the matrices.
     SolverData& data =
         getSubsystem().getImpl().updCachedScratchboard(s).updOrInsert(nActive);
 
