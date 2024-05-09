@@ -1419,25 +1419,6 @@ void CableSpan::Impl::calcPathErrorJacobian(
     };
 }
 
-Real CableSpan::Impl::calcCableLength(
-    const State& s,
-    const std::vector<LineSegment>& lines) const
-{
-    Real lTot = 0.;
-    for (const LineSegment& line : lines) {
-        // TODO spell out as length.
-        lTot += line.l;
-    }
-
-    for (const CurveSegment& segment : m_CurveSegments) {
-        if (!segment.getImpl().getInstanceEntry(s).isActive()) {
-            continue;
-        }
-        lTot += segment.getImpl().getInstanceEntry(s).length;
-    }
-    return lTot;
-}
-
 Real CableSpan::Impl::calcLineSegments(
     const State& s,
     Vec3 p_O,

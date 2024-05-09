@@ -817,10 +817,6 @@ private:
         Vec3 p_I,
         std::vector<LineSegment>& lines) const;
 
-    Real calcCableLength(
-        const State& state,
-        const std::vector<LineSegment>& lines) const;
-
     const Mobod& getOriginBody() const
     {
         return m_OriginBody;
