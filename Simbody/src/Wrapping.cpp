@@ -19,7 +19,7 @@ using LocalGeodesicInfo   = CurveSegment::Impl::InstanceEntry;
 using LocalGeodesicSample = CurveSegment::Impl::LocalGeodesicSample;
 using PointVariation      = ContactGeometry::GeodesicPointVariation;
 using SolverData          = CableSubsystem::Impl::SolverData;
-using Status              = CurveSegment::Status;
+using Status              = CurveSegment::WrappingStatus;
 using Variation           = ContactGeometry::GeodesicVariation;
 
 //==============================================================================
@@ -70,7 +70,7 @@ const Transform& CurveSegment::getXformSurfaceToBody() const
     return getImpl().getXformSurfaceToBody();
 }
 
-CurveSegment::Status CurveSegment::getStatus(const State& s) const
+CurveSegment::WrappingStatus CurveSegment::getStatus(const State& s) const
 {
     getImpl().realizeCablePosition(s);
     return getImpl().getInstanceEntry(s).status;
@@ -991,7 +991,7 @@ void CurveSegment::Impl::calcLiftoffIfNeeded(
 {
     // Only attempt liftoff when currently wrapping the surface.
     LocalGeodesicInfo& g = cache;
-    if (g.status != Status::Ok) {
+    if (g.status != WrappingStatus::InContactWithSurface) {
         return;
     }
 
@@ -1011,7 +1011,7 @@ void CurveSegment::Impl::calcLiftoffIfNeeded(
     }
 
     // Liftoff detected: update status.
-    g.status = Status::Lifted;
+    g.status = WrappingStatus::LiftedFromSurface;
     // Initialize the tracking point from the last geodesic start point.
     cache.trackingPointOnLine = g.K_P.p();
 }
@@ -1023,7 +1023,7 @@ void CurveSegment::Impl::calcTouchdownIfNeeded(
 {
     // Only attempt touchdown when lifted.
     LocalGeodesicInfo& g = cache;
-    if (g.status != Status::Lifted) {
+    if (g.status != WrappingStatus::LiftedFromSurface) {
         return;
     }
 
@@ -1041,7 +1041,7 @@ void CurveSegment::Impl::calcTouchdownIfNeeded(
     }
 
     // Touchdown detected: Remove the Lifted status flag.
-    g.status = Status::Ok;
+    g.status = WrappingStatus::InContactWithSurface;
     // Shoot a zero length geodesic at the touchdown point.
     shootNewGeodesic(
         cache.trackingPointOnLine,

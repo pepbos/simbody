@@ -45,7 +45,7 @@ public:
     {
         bool isActive() const
         {
-            return status == Status::Ok;
+            return status == WrappingStatus::InContactWithSurface;
         }
 
         FrenetFrame K_P{};
@@ -60,7 +60,7 @@ public:
         Real sHint = NaN;
 
         Vec3 trackingPointOnLine{NaN, NaN, NaN};
-        Status status = Status::Lifted;
+        WrappingStatus status = WrappingStatus::InContactWithSurface;
 
         // TODO experimental, might remove later.
         FrenetFrame prev_K_P;
@@ -68,7 +68,7 @@ public:
         Variation prev_dK_P;
         Variation prev_dK_Q;
         Correction prev_correction;
-        Status prev_status = Status::Disabled;
+        WrappingStatus prev_status = WrappingStatus::Disabled;
     };
 
     // Position level cache: Curve in ground frame.
@@ -114,7 +114,7 @@ public:
         Value<InstanceEntry>* cache = new Value<InstanceEntry>();
 
         cache->upd().length              = 0.;
-        cache->upd().status              = Status::Lifted;
+        cache->upd().status              = WrappingStatus::LiftedFromSurface;
         cache->upd().trackingPointOnLine = getContactPointHint();
 
         m_InstanceIx = updSubsystem().allocateAutoUpdateDiscreteVariable(
@@ -139,7 +139,7 @@ public:
                 "expected not realized when calling realizePosition");
         }
 
-        if (getInstanceEntry(s).status == Status::Disabled) {
+        if (getInstanceEntry(s).status == WrappingStatus::Disabled) {
             return;
         }
 

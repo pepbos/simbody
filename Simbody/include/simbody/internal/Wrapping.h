@@ -57,17 +57,11 @@ public:
         Vec3 initialContactPointHint);
 
     /** A helper class, representing the wrapping status of this segment in
-      relation to the contact geometry.
-
-      Status::Ok indicates that the cable is in contact with the surface.
-      Status::Lifted indicates that the cable is not in contact with the surface.
-      Status::Disabled indicates that the surface obstacle is "disabled",
-      preventing any interaction with the
-      cable. */
-    enum class Status
+      relation to the contact geometry.*/
+    enum class WrappingStatus
     {
-        Ok,
-        Lifted,
+        InContactWithSurface,
+        LiftedFromSurface,
         Disabled,
     };
 
@@ -104,7 +98,7 @@ public:
 
     /** Get the wrapping status of this segment.
     The system must be realiezd to Stage::Position. */
-    Status getStatus(const State& state) const;
+    WrappingStatus getStatus(const State& state) const;
 
     /** Get the number of steps taken by the GeodesicIntegrator to compute this segment during the last realization.
     The system must be realiezd to Stage::Position. */
@@ -141,7 +135,7 @@ public:
 
     bool isActive(const State& state) const
     {
-        return getStatus(state) == Status::Ok;
+        return getStatus(state) == WrappingStatus::InContactWithSurface;
     }
 
 //------------------------------------------------------------------------------
