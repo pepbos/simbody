@@ -1087,12 +1087,14 @@ void CurveSegment::Impl::shootNewGeodesic(
     InstanceEntry& cache) const
 {
     cache.samples.clear();
+    cache.sHint = sHint;
+
     calcGeodesicAndVariationImplicitly(
         m_Geometry,
         x,
         t,
         l,
-        sHint,
+        cache.sHint,
         cache.K_P,
         cache.dK_P,
         cache.K_Q,
