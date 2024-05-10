@@ -81,8 +81,6 @@ public:
 
         Variation dKP{};
         Variation dKQ{};
-
-        SpatialVec unitForce;
     };
 //------------------------------------------------------------------------------
 
