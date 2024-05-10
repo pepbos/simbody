@@ -726,10 +726,15 @@ public:
         // Origin contact point moment arm in ground.
         const Vec3& r = m_OriginPoint;
 
+        Vec3 nextPointG = posInfo.xI;
+        for (const CurveSegment& curve : m_CurveSegments) {
+            if (curve.getImpl().getInstanceEntry(s).isActive()) {
+                nextPointG = curve.getImpl().getPosInfo(s).KP.p();
+                break;
+            }
+        }
         // Tangent direction at origin contact point in ground.
-        // TODO fix finding first active segment.
-        const UnitVec3& t =
-            UnitVec3(findNextPoint(s, CurveSegmentIndex(-1)) - posInfo.xO);
+        const UnitVec3& t = UnitVec3(nextPointG - posInfo.xO);
 
         unitForce_G[0] = -r % t;
         unitForce_G[1] = -Vec3(t);
@@ -744,11 +749,16 @@ public:
         // Termination contact point moment arm in ground.
         const Vec3& r = m_TerminationPoint;
 
+        Vec3 prevPointG = posInfo.xO;
+        // TODO fix this loop.
+        for (const CurveSegment& curve : m_CurveSegments) {
+            if (curve.getImpl().getInstanceEntry(s).isActive()) {
+                prevPointG = curve.getImpl().getPosInfo(s).KP.p();
+            }
+        }
+
         // Tangent directions at termination contact point in ground.
-        // TODO fix finding last active segment.
-        const UnitVec3& t = UnitVec3(
-            posInfo.xI -
-            findNextPoint(s, CurveSegmentIndex(getNumCurveSegments())));
+        const UnitVec3& t = UnitVec3(posInfo.xI - prevPointG);
 
         unitForce_G[0] = r % t;
         unitForce_G[1] = Vec3(t);
