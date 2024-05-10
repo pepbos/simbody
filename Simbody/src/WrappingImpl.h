@@ -874,7 +874,9 @@ private:
         return *m_Subsystem;
     }
 
-    void callForEachActiveCurveSegment(const State& s, std::function<void(const CurveSegment::Impl&)> f) const;
+    void callForEachActiveCurveSegment(
+        const State& s,
+        std::function<void(const CurveSegment::Impl&)> f) const;
 
     // Reference back to the subsystem.
     CableSubsystem* m_Subsystem; // TODO just a pointer?
@@ -920,14 +922,14 @@ public:
             const int n            = nActive;
 
             lineSegments.resize(n + 1);
-            pathErrorJacobian = Matrix(C * n, Q * n, 0.);
-            pathCorrection    = Vector(Q * n, 0.);
-            pathError         = Vector(C * n, 0.);
-            prevPathError     = Vector(C * n, NaN);
-            mat               = Matrix(Q * n, Q * n, NaN);
-            vec               = Vector(Q * n, NaN);
-            solverError       = Vector(Q * n, NaN);
-            localLinearityError               = Vector(Q * n, NaN);
+            pathErrorJacobian   = Matrix(C * n, Q * n, 0.);
+            pathCorrection      = Vector(Q * n, 0.);
+            pathError           = Vector(C * n, 0.);
+            prevPathError       = Vector(C * n, NaN);
+            mat                 = Matrix(Q * n, Q * n, NaN);
+            vec                 = Vector(Q * n, NaN);
+            solverError         = Vector(Q * n, NaN);
+            localLinearityError = Vector(Q * n, NaN);
         }
 
         std::vector<CableSpan::LineSegment> lineSegments;
