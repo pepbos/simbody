@@ -154,6 +154,11 @@ public:
             // Grab the last geodesic that was computed.
             assertSurfaceBounds(prevPoint_S, nextPoint_S);
 
+            calcInitialPathIfNeeded(
+                prevPoint_S,
+                nextPoint_S,
+                updInstanceEntry(s));
+
             calcTouchdownIfNeeded(
                 prevPoint_S,
                 nextPoint_S,
@@ -304,7 +309,11 @@ public:
         unitForce_G[1] = t_Q - t_P;
     }
 
-    void calcMaxCorrectionStepSize(const State& s, const Correction& c, Real maxCorrectionStepDeg, Real& maxStepSize) const;
+    void calcMaxCorrectionStepSize(
+        const State& s,
+        const Correction& c,
+        Real maxCorrectionStepDeg,
+        Real& maxStepSize) const;
 
     // TODO Below code should be moved to a unit test.
     void assertLastCorrection(const State& s) const
@@ -533,6 +542,29 @@ private:
     // surface coordinates.
     void assertSurfaceBounds(const Vec3& prevPoint_S, const Vec3& nextPoint_S)
         const;
+
+    void calcInitialPathIfNeeded(
+        const Vec3& prevPoint_S,
+        const Vec3& nextPoint_S,
+        InstanceEntry& cache) const
+    {
+        // Initialize the path when enabling the segment.
+        const bool enableSwitchDetected =
+            cache.status == WrappingStatus::InContactWithSurface &&
+            cache.prev_status == WrappingStatus::Disabled;
+
+        if (!enableSwitchDetected) {
+            return;
+        }
+
+        // Shoot zero length geodesic at configured initial contact point.
+        shootNewGeodesic(
+            m_ContactPointHint_S,
+            nextPoint_S - prevPoint_S,
+            0.,
+            0.,
+            cache);
+    }
 
     // Attempt to compute the point of touchdown on the surface.
     void calcTouchdownIfNeeded(
