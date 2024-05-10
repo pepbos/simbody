@@ -310,17 +310,28 @@ void calcSurfaceProjectionFast(
     }
 
     UnitVec3 n(calcSurfaceConstraintGradient(geometry, x));
-    t         = t - dot(n, t) * n;
-    Real norm = t.norm();
-    if (isNaN(norm))
-        // TODO use SimTK_ASSERT
-        throw std::runtime_error("Surface projection failed: Detected NaN");
-    if (norm < 1e-13)
-        // TODO use SimTK_ASSERT
-        throw std::runtime_error("Surface projection failed: Tangent guess is "
-                                 "parallel to surface normal");
+    while (true) {
+        t         = t - dot(n, t) * n;
+        Real norm = t.norm();
+        if (isNaN(norm))
+            // TODO use SimTK_ASSERT
+            throw std::runtime_error("Surface projection failed: Detected NaN");
+        if (norm < 1e-13) {
+            std::cout << "WARNING: Tangent guess is parallel to surface "
+                         "normal: perturbing\n";
 
-    t = t / norm;
+            Random::Gaussian random;
+            t += Vec3{
+                random.getValue(),
+                random.getValue(),
+                random.getValue(),
+            };
+            std::cout << "t = " << t << "\n";
+        } else {
+            t = t / norm;
+            break;
+        }
+    }
 }
 
 bool calcNearestPointOnLineImplicitly(
