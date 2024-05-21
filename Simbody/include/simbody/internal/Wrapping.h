@@ -51,7 +51,7 @@ public:
     belong to a valid cable path.*/
     CurveSegment(
         CableSpan cable,
-        const MobilizedBody& mobod,
+        MobilizedBodyIndex body,
         Transform X_BS,
         const ContactGeometry& geometry,
         Vec3 initialContactPointHint);
@@ -198,13 +198,13 @@ public:
 //------------------------------------------------------------------------------
     CableSpan(
         CableSubsystem& subsystem,
-        const MobilizedBody& originBody,
+        MobilizedBodyIndex originBody,
         const Vec3& defaultOriginPoint,
-        const MobilizedBody& terminationBody,
+        MobilizedBodyIndex terminationBody,
         const Vec3& defaultTerminationPoint);
 
     void adoptWrappingObstacle(
-        const MobilizedBody& mobod,
+        MobilizedBodyIndex mobod,
         Transform X_BS,
         const ContactGeometry& geometry,
         Vec3 contactPointHint = {1., 0., 0.});

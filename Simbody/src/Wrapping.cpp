@@ -28,12 +28,12 @@ using Variation           = ContactGeometry::GeodesicVariation;
 
 CurveSegment::CurveSegment(
     CableSpan cable,
-    const MobilizedBody& mobod,
+    MobilizedBodyIndex body,
     Transform X_BS,
     const ContactGeometry& geometry,
     Vec3 xHint) :
     m_Impl(std::shared_ptr<CurveSegment::Impl>(
-        new CurveSegment::Impl(cable, mobod, X_BS, geometry, xHint)))
+        new CurveSegment::Impl(cable, body, X_BS, geometry, xHint)))
 {
     // TODO bit awkward to set the index later.
     updImpl().setIndex(cable.updImpl().adoptSegment(*this));
@@ -122,9 +122,9 @@ int CurveSegment::calcPoints(
 
 CableSpan::CableSpan(
     CableSubsystem& subsystem,
-    const MobilizedBody& originBody,
+    MobilizedBodyIndex originBody,
     const Vec3& defaultOriginPoint,
-    const MobilizedBody& terminationBody,
+    MobilizedBodyIndex terminationBody,
     const Vec3& defaultTerminationPoint) :
     m_Impl(std::shared_ptr<Impl>(new Impl(
         subsystem,
@@ -137,12 +137,12 @@ CableSpan::CableSpan(
 }
 
 void CableSpan::adoptWrappingObstacle(
-    const MobilizedBody& mobod,
+    MobilizedBodyIndex body,
     Transform X_BS,
     const ContactGeometry& geometry,
     Vec3 contactPointHint)
 {
-    CurveSegment(*this, mobod, X_BS, geometry, contactPointHint);
+    CurveSegment(*this, body, X_BS, geometry, contactPointHint);
 }
 
 int CableSpan::getNumCurveSegments() const
@@ -1141,19 +1141,27 @@ void CurveSegment::Impl::calcMaxCorrectionStepSize(
 
 CurveSegment::Impl::Impl(
     CableSpan path,
-    const MobilizedBody& mobod,
+    MobilizedBodyIndex body,
     const Transform& X_BS,
     ContactGeometry geometry,
     Vec3 initPointGuess) :
     m_Subsystem(&path.updImpl().updSubsystem()),
     m_Path(path), m_Index(-1), // TODO what to do with this index, and when
-    m_Mobod(mobod), m_X_BS(X_BS), m_Geometry(geometry),
+    m_Body(body), m_X_BS(X_BS), m_Geometry(geometry),
     m_ContactPointHint_S(initPointGuess),
     m_Decoration(geometry.createDecorativeGeometry()
                      .setColor(Orange)
                      .setOpacity(.75)
                      .setResolution(3))
-{}
+{
+    SimTK_ASSERT(body.isValid(), "Failed to create new CurveSegment: Invalid MobilizedBodyIndex.");
+}
+
+const MobilizedBody& CurveSegment::Impl::getMobilizedBody() const
+{
+    return getSubsystem().getImpl().getMultibodySystem().
+        getMatterSubsystem().getMobilizedBody(m_Body);
+}
 
 void CurveSegment::Impl::realizeCablePosition(const State& s) const
 {
@@ -1202,6 +1210,18 @@ void addPathErrorJacobian(
 //==============================================================================
 //                              CABLE SPAN IMPL
 //==============================================================================
+
+const Mobod& CableSpan::Impl::getOriginBody() const
+{
+    return getSubsystem().getImpl().getMultibodySystem().
+        getMatterSubsystem().getMobilizedBody(m_OriginBody);
+}
+
+const Mobod& CableSpan::Impl::getTerminationBody() const
+{
+    return getSubsystem().getImpl().getMultibodySystem().
+        getMatterSubsystem().getMobilizedBody(m_TerminationBody);
+}
 
 void CableSpan::Impl::realizeTopology(State& s)
 {
@@ -1311,7 +1331,7 @@ Vec3 CableSpan::Impl::findPrevPoint(const State& s, CurveSegmentIndex ix) const
 {
     const CurveSegment* segment = findPrevActiveCurveSegment(s, ix);
     return segment ? segment->getImpl().calcFinalContactPoint(s)
-                   : m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(
+                   : getOriginBody().getBodyTransform(s).shiftFrameStationToBase(
                          m_OriginPoint);
 }
 
@@ -1320,7 +1340,7 @@ Vec3 CableSpan::Impl::findNextPoint(const State& s, CurveSegmentIndex ix) const
     const CurveSegment* segment = findNextActiveCurveSegment(s, ix);
     return segment
                ? segment->getImpl().calcInitialContactPoint(s)
-               : m_TerminationBody.getBodyTransform(s).shiftFrameStationToBase(
+               : getTerminationBody().getBodyTransform(s).shiftFrameStationToBase(
                      m_TerminationPoint);
 }
 
@@ -1548,9 +1568,9 @@ void CableSpan::Impl::calcPathErrorJacobianUtility(
 
     // Compute the straight-line segments.
     const Vec3 x_O =
-        m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
+        getOriginBody().getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
     const Vec3 x_I =
-        m_TerminationBody.getBodyTransform(s).shiftFrameStationToBase(
+        getTerminationBody().getBodyTransform(s).shiftFrameStationToBase(
             m_TerminationPoint);
     calcLineSegments(s, x_O, x_I, data.lineSegments);
 
@@ -1586,9 +1606,9 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 {
     // Path origin and termination point.
     const Vec3 x_O =
-        m_OriginBody.getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
+        getOriginBody().getBodyTransform(s).shiftFrameStationToBase(m_OriginPoint);
     const Vec3 x_I =
-        m_TerminationBody.getBodyTransform(s).shiftFrameStationToBase(
+        getTerminationBody().getBodyTransform(s).shiftFrameStationToBase(
             m_TerminationPoint);
 
     posInfo.xO = x_O;
@@ -1776,7 +1796,7 @@ void CableSpan::Impl::calcVelInfo(const State& s, VelInfo& velInfo) const
 
     Real& lengthDot = (velInfo.lengthDot = 0.);
 
-    Vec3 v_GQ = m_OriginBody.findStationVelocityInGround(s, m_OriginPoint);
+    Vec3 v_GQ = getOriginBody().findStationVelocityInGround(s, m_OriginPoint);
     const CurveSegment* lastActive = nullptr;
     for (const CurveSegment& curve : m_CurveSegments) {
         if (!curve.getImpl().getInstanceEntry(s).isActive()) {
@@ -1798,7 +1818,7 @@ void CableSpan::Impl::calcVelInfo(const State& s, VelInfo& velInfo) const
     }
 
     const Vec3 v_GP =
-        m_TerminationBody.findStationVelocityInGround(s, m_TerminationPoint);
+        getTerminationBody().findStationVelocityInGround(s, m_TerminationPoint);
 
     const PosInfo& pos = getPosInfo(s);
     const UnitVec3 e_G =

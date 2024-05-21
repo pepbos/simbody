@@ -241,10 +241,7 @@ public:
         return m_Decoration;
     }
 
-    const MobilizedBody& getMobilizedBody() const
-    {
-        return m_Mobod;
-    }
+    const MobilizedBody& getMobilizedBody() const;
 
     const Transform& getXformSurfaceToBody() const
     {
@@ -286,7 +283,7 @@ public:
 
     Transform calcSurfaceFrameInGround(const State& s) const
     {
-        return m_Mobod.getBodyTransform(s).compose(m_X_BS);
+        return getMobilizedBody().getBodyTransform(s).compose(m_X_BS);
     }
 
     int calcPathPoints(const State& s, std::vector<Vec3>& points, int nSamples)
@@ -295,7 +292,7 @@ public:
     void calcUnitForce(const State& s, SpatialVec& unitForce_G) const
     {
         const PosInfo& posInfo = getPosInfo(s);
-        const Vec3& x_BG       = m_Mobod.getBodyOriginLocation(s);
+        const Vec3& x_BG       = getMobilizedBody().getBodyOriginLocation(s);
 
         // Contact point moment arms in ground.
         const Vec3 r_P = posInfo.KP.p() - x_BG;
@@ -590,7 +587,7 @@ private:
     CurveSegmentIndex m_Index;   // The index in its path.
 
     // MobilizedBody that surface is attached to.
-    MobilizedBody m_Mobod;
+    MobilizedBodyIndex m_Body;
     // Surface to body transform.
     Transform m_X_BS;
 
@@ -628,9 +625,9 @@ class CableSpan::Impl
 public:
     Impl(
         CableSubsystem& subsystem,
-        MobilizedBody originBody,
+        MobilizedBodyIndex originBody,
         Vec3 originPoint,
-        MobilizedBody terminationBody,
+        MobilizedBodyIndex terminationBody,
         Vec3 terminationPoint) :
         m_Subsystem(&subsystem),
         m_OriginBody(originBody), m_OriginPoint(originPoint),
@@ -776,7 +773,7 @@ public:
 
         {
             calcUnitForceAtOrigin(state, unitForce);
-            SpatialVec v = m_OriginBody.getBodyVelocity(state);
+            SpatialVec v = getOriginBody().getBodyVelocity(state);
             unitPower += ~unitForce * v;
         }
 
@@ -792,7 +789,7 @@ public:
 
         {
             calcUnitForceAtTermination(state, unitForce);
-            SpatialVec v = m_TerminationBody.getBodyVelocity(state);
+            SpatialVec v = getTerminationBody().getBodyVelocity(state);
             unitPower += ~unitForce * v;
         }
 
@@ -855,14 +852,8 @@ private:
         Vec3 p_I,
         std::vector<LineSegment>& lines) const;
 
-    const Mobod& getOriginBody() const
-    {
-        return m_OriginBody;
-    }
-    const Mobod& getTerminationBody() const
-    {
-        return m_TerminationBody;
-    }
+    const Mobod& getOriginBody() const;
+    const Mobod& getTerminationBody() const;
 
     const CableSubsystem& getSubsystem() const
     {
@@ -881,10 +872,10 @@ private:
     // Reference back to the subsystem.
     CableSubsystem* m_Subsystem; // TODO just a pointer?
 
-    MobilizedBody m_OriginBody;
+    MobilizedBodyIndex m_OriginBody;
     Vec3 m_OriginPoint;
 
-    MobilizedBody m_TerminationBody;
+    MobilizedBodyIndex m_TerminationBody;
     Vec3 m_TerminationPoint;
 
     Array_<CurveSegment, CurveSegmentIndex> m_CurveSegments{};
@@ -985,9 +976,9 @@ public:
         return cables[index];
     }
 
-    // Add a cable path to the list, bumping the reference count.
     CableSpanIndex adoptCablePath(CableSpan& path)
     {
+        invalidateSubsystemTopologyCache();
         cables.push_back(path);
         return CableSpanIndex(cables.size() - 1);
     }
