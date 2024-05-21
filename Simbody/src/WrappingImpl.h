@@ -96,7 +96,7 @@ public:
     // TODO you would expect the constructor to take the index as well here?
     Impl(
         CableSpan path,
-        const MobilizedBody& mobod,
+        MobilizedBodyIndex body,
         const Transform& X_BS,
         ContactGeometry geometry,
         Vec3 initPointGuess);
