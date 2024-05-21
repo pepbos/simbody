@@ -131,7 +131,13 @@ public:
     that if nPoints=1, and the curve length is not zero, an exception is
     thrown.
     @return The number of points written. */
-    int calcPoints(const State& state, std::vector<Vec3>& points_G, int nPoints = 0) const;
+    int calcPoints(const State& state, std::function<void(Vec3 point_G)>& sink, int nPoints) const;
+
+    /** Comute points along the curve in ground frame.
+    The system must be realiezd to Stage::Position.
+    TODO describe behavior
+    */
+    int calcPoints(const State& state, std::function<void(Vec3 point_G)>& sink) const;
 
     bool isActive(const State& state) const
     {
@@ -246,7 +252,7 @@ public:
     Real calcCablePower(const State& state, Real tension) const;
 
     // Calls `CurveSegment::calcPoints` on each active curve segment.
-    int calcPoints(const State& state, std::vector<Vec3>& points_G, int nPointsPerCurveSegment = 0) const;
+    int calcPoints(const State& state, std::function<void(Vec3 point_G)>& sink, int nPointsPerCurveSegment = 0) const;
 
 //------------------------------------------------------------------------------
 //                TODO TEMPORARY FOR UNIT TESTING

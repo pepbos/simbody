@@ -107,13 +107,10 @@ void CurveSegment::calcUnitForce(const State& state, SpatialVec& unitForce_G)
     getImpl().calcUnitForce(state, unitForce_G);
 }
 
-int CurveSegment::calcPoints(
-    const State& state,
-    std::vector<Vec3>& points_G,
-    int nPoints) const
+int CurveSegment::calcPoints(const State& state, std::function<void(Vec3 point_G)>& sink, int nPoints) const
 {
     getImpl().realizeCablePosition(state);
-    return getImpl().calcPathPoints(state, points_G, nPoints);
+    return getImpl().calcPathPoints(state, sink, nPoints);
 }
 
 //==============================================================================
@@ -173,12 +170,10 @@ void CableSpan::applyBodyForces(
     return getImpl().applyBodyForces(s, tension, bodyForcesInG);
 }
 
-int CableSpan::calcPoints(
-    const State& state,
-    std::vector<Vec3>& points_G,
+int CableSpan::calcPoints(const State& state, std::function<void(Vec3 point_G)>& sink,
     int nPointsPerCurveSegment) const
 {
-    return getImpl().calcPathPoints(state, points_G, nPointsPerCurveSegment);
+    return getImpl().calcPathPoints(state, sink, nPointsPerCurveSegment);
 }
 
 void CableSpan::calcUnitForceAtOrigin(
@@ -812,7 +807,7 @@ size_t calcResampledGeodesicPoints(
     const std::vector<LocalGeodesicSample>& geodesic,
     const Transform& X_GS,
     int nSamples,
-    std::vector<Vec3>& interpolatedSamples)
+    std::function<void(Vec3 interpolatedPoint)>& sink)
 {
     // Some sanity checks.
     if (geodesic.empty()) {
@@ -837,7 +832,7 @@ size_t calcResampledGeodesicPoints(
     }
 
     // Capture the start of the geodesic.
-    interpolatedSamples.push_back(
+    sink(
         X_GS.shiftFrameStationToBase(geodesic.front().frame.p()));
 
     // If there is but one sample in the geodesic, write that sample and exit.
@@ -896,27 +891,23 @@ size_t calcResampledGeodesicPoints(
             // Transform to ground frame.
             const Vec3 point_G = X_GS.shiftFrameStationToBase(point_S);
             // Write interpolated point to the output buffer.
-            interpolatedSamples.push_back(point_G);
+            sink(point_G);
 
             break;
         }
     }
 
     // Capture the last point of the geodesic.
-    interpolatedSamples.push_back(
-        X_GS.shiftFrameStationToBase(geodesic.back().frame.p()));
+    sink(X_GS.shiftFrameStationToBase(geodesic.back().frame.p()));
 
     return nSamples;
 }
 } // namespace
 
-int CurveSegment::Impl::calcPathPoints(
-    const State& s,
-    std::vector<Vec3>& points,
-    int nSamples) const
+int CurveSegment::Impl::calcPathPoints(const State& state, std::function<void(Vec3 point_G)>& sink, int nSamples) const
 {
-    const Transform& X_GS           = getPosInfo(s).X_GS;
-    const InstanceEntry& geodesic_S = getInstanceEntry(s);
+    const Transform& X_GS           = getPosInfo(state).X_GS;
+    const InstanceEntry& geodesic_S = getInstanceEntry(state);
     if (!geodesic_S.isActive()) {
         return 0;
     }
@@ -925,8 +916,9 @@ int CurveSegment::Impl::calcPathPoints(
     // integrator to the output buffer.
     if (nSamples == 0) {
         for (const LocalGeodesicSample& sample : geodesic_S.samples) {
-            points.push_back(X_GS.shiftFrameStationToBase(sample.frame.p()));
+            sink(X_GS.shiftFrameStationToBase(sample.frame.p()));
         }
+        return geodesic_S.samples.size();
     }
 
     // Resample the points from the integrator by interpolating at equal
@@ -935,7 +927,7 @@ int CurveSegment::Impl::calcPathPoints(
         geodesic_S.samples,
         X_GS,
         nSamples,
-        points);
+        sink);
 }
 
 //==============================================================================
@@ -1873,85 +1865,32 @@ int CableSpan::Impl::calcDecorativeGeometryAndAppend(
     Stage stage,
     Array_<DecorativeGeometry>& decorations) const
 {
-    // TODO clean this up. (also, should decorations be done here?)
-    const Vec3 color = Green; // Red Purple
+    static constexpr int LINE_THICKNESS = 3;
 
     const PosInfo& ppe = getPosInfo(s);
-
-    // Draw point at origin and termination.
-    decorations.push_back(DecorativePoint(ppe.xO).setColor(Green));
-    decorations.push_back(DecorativePoint(ppe.xI).setColor(Red));
-
-    if (countActive(s) == 0) {
-        decorations.push_back(DecorativeLine(ppe.xO, ppe.xI)
-                .setColor(Purple)
-                .setLineThickness(3));
-    }
+    Vec3 prevPoint = ppe.xO;
 
     for (const CurveSegment& curveSegment : m_CurveSegments) {
         const CurveSegment::Impl& curve = curveSegment.getImpl();
 
-        const Transform X_GS   = curve.calcSurfaceFrameInGround(s);
-        DecorativeGeometry geo = curve.getDecoration();
-        const Transform& X_SD  = geo.getTransform(); // TODO getTransform?
+        if (curve.getInstanceEntry(s).isActive()) {
+            const CurveSegment::Impl::PosInfo cppe = curve.getPosInfo(s);
 
-        // Inactive surfaces are dimmed.
-        if (!curve.getInstanceEntry(s).isActive()) {
-            decorations.push_back(geo.setTransform(X_GS * X_SD)
-                                      .setColor(Real(0.75) * geo.getColor()));
-            continue;
+            const Vec3 nextPoint = cppe.KP.p();
+            decorations.push_back(DecorativeLine(prevPoint, nextPoint)
+                    .setColor(Purple)
+                    .setLineThickness(LINE_THICKNESS));
+            prevPoint = cppe.KQ.p();
         }
 
-        decorations.push_back(geo.setTransform(X_GS * X_SD));
-
-        {
-            const Vec3 prevPoint = findPrevPoint(s, curveSegment);
-            const Vec3 x_P       = curve.getPosInfo(s).KP.p();
-
-            decorations.push_back(DecorativeLine(prevPoint, x_P)
-                                      .setColor(Orange)
-                                      .setLineThickness(2));
-        }
-
-        // TODO this is for debugging: Draw the Frenet frames
-        Transform K_P                            = curve.getPosInfo(s).KP;
-        Transform K_Q                            = curve.getPosInfo(s).KQ;
-        const std::array<CoordinateAxis, 3> axes = {
-            TangentAxis,
-            NormalAxis,
-            BinormalAxis};
-        const std::array<Vec3, 3> colors = {Red, Green, Blue};
-
-        for (size_t i = 0; i < 3; ++i) {
-            decorations.push_back(
-                DecorativeLine(
-                    K_P.p(),
-                    K_P.p() + 0.5 * K_P.R().getAxisUnitVec(axes.at(i)))
-                    .setColor(colors.at(i))
-                    .setLineThickness(4));
-            decorations.push_back(
-                DecorativeLine(
-                    K_Q.p(),
-                    K_Q.p() + 0.5 * K_Q.R().getAxisUnitVec(axes.at(i)))
-                    .setColor(colors.at(i))
-                    .setLineThickness(4));
-        }
-
-        {
-            const Vec3 nextPoint = findNextPoint(s, curveSegment);
-            const Vec3 x_Q       = curve.getPosInfo(s).KQ.p();
-
-            decorations.push_back(DecorativeLine(nextPoint, x_Q)
-                                      .setColor(Gray)
-                                      .setLineThickness(2));
-        }
-
-        curveSegment.getImpl().calcDecorativeGeometryAndAppend(s, decorations);
+        curve.calcDecorativeGeometryAndAppend(s, decorations);
     }
 
-    /* decorations.push_back(DecorativeLine(lastCurvePoint, ppe.xI) */
-    /*         .setColor(Purple) */
-    /*         .setLineThickness(3)); */
+    // TODO choose colors.
+    decorations.push_back(DecorativeLine(prevPoint, ppe.xI)
+            .setColor(Purple)
+            .setLineThickness(3));
+
     return 0;
 }
 

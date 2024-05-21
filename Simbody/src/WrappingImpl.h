@@ -286,8 +286,7 @@ public:
         return getMobilizedBody().getBodyTransform(s).compose(m_X_BS);
     }
 
-    int calcPathPoints(const State& s, std::vector<Vec3>& points, int nSamples)
-        const;
+    int calcPathPoints(const State& state, std::function<void(Vec3 point_G)>& sink, int nSamples = 0) const;
 
     void calcUnitForce(const State& s, SpatialVec& unitForce_G) const
     {
@@ -489,19 +488,73 @@ public:
         const State& s,
         Array_<DecorativeGeometry>& decorations) const
     {
+        static constexpr int LINE_THICKNESS = 3;
+        static constexpr Real INACTIVE_OPACITY = 0.25;
+
         const InstanceEntry& cache = getInstanceEntry(s);
-        if (!cache.isActive()) {
+        const PosInfo& ppe = getPosInfo(s);
+
+        // Draw the surface (TODO since we do not own it, should it be done here at all?).
+        {
+            DecorativeGeometry geo = getDecoration(); // TODO clone it?
+            const Transform& X_GS  = ppe.X_GS;
+            const Transform& X_SD  = geo.getTransform();
+            // Inactive surfaces are dimmed.
+            const Vec3 color = cache.isActive() ?
+                geo.getColor() : geo.getColor() * INACTIVE_OPACITY;
+
+            decorations.push_back(geo.setTransform(X_GS * X_SD)
+                    .setColor(color));
+        }
+
+        // Check wrapping status to see if there is a curve to draw.
+        if (!cache.isActive() || cache.length <= 0.) {
             return;
         }
 
-        const Transform& X_GS = calcSurfaceFrameInGround(s);
-        Vec3 a                = X_GS.shiftFrameStationToBase(cache.K_P.p());
-        for (size_t i = 1; i < cache.samples.size(); ++i) {
-            const Vec3 b =
-                X_GS.shiftFrameStationToBase(cache.samples.at(i).frame.p());
-            decorations.push_back(
-                DecorativeLine(a, b).setColor(Purple).setLineThickness(3));
-            a = b;
+        // Draw the curve segment as straight lines between prevPoint and nextPoint.
+        {
+            bool isFirstSample = true;
+            Vec3 prevPoint {NaN};
+            std::function<void(Vec3)> drawLine = [&](Vec3 nextPoint) {
+                if (!isFirstSample) {
+                    decorations.push_back(
+                            DecorativeLine(prevPoint, nextPoint).setColor(Purple).setLineThickness(3));
+                }
+                isFirstSample = false;
+                prevPoint = nextPoint;
+            };
+
+            calcPathPoints(s, drawLine);
+        }
+
+        // Draw the Frenet frame at curve start and end.
+        // TODO this is for debugging should be removed.
+        {
+            static constexpr int FRENET_FRAME_LINE_THICKNESS = 5;
+            static constexpr Real FRENET_FRAME_LINE_LENGTH = 0.5;
+
+            const std::array<CoordinateAxis, 3> axes = {
+                TangentAxis,
+                NormalAxis,
+                BinormalAxis};
+            const std::array<Vec3, 3> colors = {Red, Green, Blue};
+
+            std::function<void(const FrenetFrame& K)> DrawFrenetFrame = [&]
+                (const FrenetFrame& K) {
+                    for (size_t i = 0; i < 3; ++i) {
+                        decorations.push_back(
+                                DecorativeLine(
+                                    K.p(),
+                                    K.p() + FRENET_FRAME_LINE_LENGTH * K.R().getAxisUnitVec(axes.at(i)))
+                                .setColor(colors.at(i))
+                                .setLineThickness(FRENET_FRAME_LINE_THICKNESS));
+
+                    }
+                };
+
+            DrawFrenetFrame(ppe.KP);
+            DrawFrenetFrame(ppe.KQ);
         }
     }
 
@@ -690,26 +743,23 @@ public:
         Stage stage,
         Array_<DecorativeGeometry>& decorations) const;
 
-    int calcPathPoints(
-        const State& state,
-        std::vector<Vec3>& points_G,
-        int nPointsPerCurveSegment) const
+    int calcPathPoints(const State& state, std::function<void(Vec3 point_G)>& sink, int nPointsPerCurveSegment) const
     {
         // Write the initial point.
         const PosInfo& pos = getPosInfo(state);
-        points_G.push_back(pos.xO);
+        sink(pos.xO);
 
         // Write points along each of the curves.
         int count = 0; // Count number of points written.
         for (const CurveSegment& curve : m_CurveSegments) {
             count += curve.getImpl().calcPathPoints(
                 state,
-                points_G,
+                sink,
                 nPointsPerCurveSegment);
         }
 
         // Write the termination point.
-        points_G.push_back(pos.xI);
+        sink(pos.xI);
 
         // Return number of points written.
         return count + 2;
