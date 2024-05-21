@@ -945,34 +945,29 @@ int CurveSegment::Impl::calcPathPoints(
 namespace
 {
 
-void calcPathCorrections(SolverData& data)
+void calcPathCorrections(SolverData& data, Real weight)
 {
-    Real w = data.pathError.normInf();
-
-    data.mat = data.pathErrorJacobian.transpose() * data.pathErrorJacobian;
-    for (int i = 0; i < data.mat.nrow(); ++i) {
-        data.mat[i][i] += w + 1e-6;
+    // Add a cost to changing the length.
+    static constexpr int NUMBER_OF_CONSTRAINTS = 4;
+    for (int i = 0; i < data.nCurves; ++i) {
+        int r                        = data.nCurves * NUMBER_OF_CONSTRAINTS + i;
+        int c                        = 4 * i + 3;
+        data.pathErrorJacobian.set(r, c, weight);
     }
-    data.matInv = data.mat;
-    data.vec    = data.pathErrorJacobian.transpose() * (data.pathError * (-1.));
-    data.matInv.solve(data.vec, data.pathCorrection);
 
-    data.solverError = data.mat * data.pathCorrection - data.vec;
-    if (data.solverError.normInf() > 1e-10) {
-        // TODO use warning channel or exception?
-        std::cout << "WARNING: Failed to invert matrix: This is bad.\n";
-    }
+    data.matInv = data.pathErrorJacobian;
+    data.matInv.solve(data.pathError, data.pathCorrection);
+    data.pathCorrection *= -1.;
 }
 
 Real calcMaxRelativeDeviationFromLinear(SolverData& data)
 {
-    data.localLinearityError =
-        data.pathErrorJacobian * data.pathCorrection + data.prevPathError;
-    if (data.localLinearityError.nrow() != data.pathError.nrow()) {
+    data.predictedPathError = data.pathErrorJacobian * data.pathCorrection + data.prevPathError;
+    if (data.predictedPathError.nrow() != data.pathError.nrow()) {
         throw std::runtime_error("Incompatible vector sizes");
     }
     const Real deviationFromLinear =
-        (data.localLinearityError - data.pathError).norm();
+        (data.predictedPathError - data.pathError).norm();
     const Real maxRelativeDeviation =
         deviationFromLinear / data.pathCorrectionNorm;
     return maxRelativeDeviation;
@@ -982,10 +977,11 @@ const Correction* getPathCorrections(SolverData& data)
 {
     static_assert(
         sizeof(Correction) == sizeof(Real) * GeodesicDOF,
-        "Invalid size of corrections vector");
-    SimTK_ASSERT(
-        data.pathCorrection.size() * sizeof(Real) == n * sizeof(Correction),
-        "Invalid size of path corrections vector");
+        "Invalid size of geodesic correction.");
+    if (data.pathCorrection.size() * sizeof(Real) !=
+        data.nCurves * sizeof(Correction)) {
+        throw std::runtime_error("Invalid size of path corrections vector.");
+    }
     return reinterpret_cast<const Correction*>(&data.pathCorrection[0]);
 }
 
@@ -1707,7 +1703,7 @@ void CableSpan::Impl::calcPosInfo(const State& s, PosInfo& posInfo) const
 
         // Compute the geodesic corrections for each curve segment: This gives
         // us a correction vector in a direction that lowers the path error.
-        calcPathCorrections(data);
+        calcPathCorrections(data, maxPathError);
 
         // Compute the step size that we take along the correction vector.
         Real stepSize            = 1.;

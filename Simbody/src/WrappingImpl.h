@@ -915,10 +915,11 @@ public:
     After computing the position level cache, this data is discarded. */
     struct SolverData
     {
-        SolverData(int nActive)
+        SolverData(int nActive) : nCurves(nActive)
         {
             static constexpr int Q = 4;
-            static constexpr int C = 4;
+            // 4 for the path error, and 1 for the weighting of the length.
+            static constexpr int C = 5;
             const int n            = nActive;
 
             lineSegments.resize(n + 1);
@@ -926,10 +927,7 @@ public:
             pathCorrection      = Vector(Q * n, 0.);
             pathError           = Vector(C * n, 0.);
             prevPathError       = Vector(C * n, NaN);
-            mat                 = Matrix(Q * n, Q * n, NaN);
-            vec                 = Vector(Q * n, NaN);
-            solverError         = Vector(Q * n, NaN);
-            localLinearityError = Vector(Q * n, NaN);
+            predictedPathError = Vector(C * n, NaN);
         }
 
         std::vector<CableSpan::LineSegment> lineSegments;
@@ -937,14 +935,13 @@ public:
         Matrix pathErrorJacobian;
         Vector pathCorrection;
         Vector pathError;
+        // TODO remove prev, and cycle pathError
         Vector prevPathError;
-        Matrix mat;
-        // TODO Cholesky decomposition would be more efficient.
-        FactorLU matInv;
-        Vector vec;
-        Vector solverError;
-        Vector localLinearityError;
+        // TODO Best solver?
+        FactorQTZ matInv; // TODO rename to inv
+        Vector predictedPathError;
         Real pathCorrectionNorm = NaN;
+        int nCurves = -1;
     };
 
     struct CacheEntry
