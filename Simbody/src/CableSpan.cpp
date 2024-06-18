@@ -112,13 +112,28 @@ struct MatrixWorkspace
     {
         static constexpr int Q = GEODESIC_DOF;
         // 4 for the path error, and 1 for the weighting of the length.
-        static constexpr int C = NUMBER_OF_CONSTRAINTS + 1;
         const int n            = problemSize;
-
         lineSegments.resize(n + 1);
-        pathErrorJacobian = Matrix(C * n, Q * n, 0.);
-        pathCorrection    = Vector(Q * n, 0.);
-        pathError         = Vector(C * n, 0.);
+
+        {
+            static constexpr int C = NUMBER_OF_CONSTRAINTS + 1;
+
+            pathErrorJacobian = Matrix(C * n, Q * n, 0.);
+            pathCorrection    = Vector(Q * n, 0.);
+            pathError         = Vector(C * n, 0.);
+        }
+
+        {
+            static constexpr int C = NUMBER_OF_CONSTRAINTS / 2.;
+
+            normalPathErrorJacobian = Matrix(C * n, Q * n, 0.);
+            normalPathError         = Vector(C * n, 0.);
+        }
+
+        {
+            lengthHessian  = Matrix(Q * n, Q * n, 0.);
+            lengthGradient = Vector(Q * n, 0.);
+        }
     }
 
     std::vector<LineSegment> lineSegments;
@@ -127,8 +142,17 @@ struct MatrixWorkspace
     Vector pathCorrection;
     Vector pathError;
     FactorQTZ inverse;
-
     Real maxPathError = NaN;
+
+    Matrix normalPathErrorJacobian;
+    Vector normalPathError;
+    FactorQTZ normalInverse;
+    Real maxNormalPathError = NaN;
+
+    Matrix lengthHessian;
+    Vector lengthGradient;
+    Real lengthStepsize = NaN;
+
     int nObstaclesInContact = -1;
 };
 
@@ -2270,15 +2294,7 @@ void calcPathErrorJacobian(
     };
 }
 
-} // namespace
-
-//==============================================================================
-//                      SOLVING FOR GEODESIC CORRECTIONS
-//==============================================================================
-
-namespace
-{
-
+// TODO move to top of file, and rename
 constexpr int GEODESIC_DOF          = MatrixWorkspace::GEODESIC_DOF;
 constexpr int NUMBER_OF_CONSTRAINTS = MatrixWorkspace::NUMBER_OF_CONSTRAINTS;
 
@@ -2310,6 +2326,31 @@ void calcPathCorrections(MatrixWorkspace& data)
     data.pathCorrection *= -1.;
 }
 
+void calcNormalPathCorrections(MatrixWorkspace& data)
+{
+    data.normalInverse = data.normalPathErrorJacobian;
+    data.normalInverse.solve(data.normalPathError, data.pathCorrection);
+    data.pathCorrection *= -1.;
+}
+
+void calcLengthCorrection(MatrixWorkspace& data, Real w)
+{
+    data.normalInverse = data.normalPathErrorJacobian;
+    // Such that J * q = g
+    // q = Jinv g - g
+    Vector& q = data.pathCorrection;
+    data.normalInverse.solve(data.lengthGradient, q);
+    q -= data.lengthGradient;
+
+    // Find the optimal step.
+    const Matrix& H = data.lengthHessian;
+    const Matrix& g = data.lengthGradient;
+    const Real qHq = (~q) * (H * q) + w;
+    data.lengthStepsize = -(~q * q) / qHq;
+
+    q *= data.lengthStepsize;
+}
+
 // Obtain iterator over the Correction per curve segment.
 const Correction* getPathCorrections(const MatrixWorkspace& data)
 {
@@ -2326,9 +2367,8 @@ const Correction* getPathCorrections(const MatrixWorkspace& data)
 } // namespace
 
 //==============================================================================
-//                      CABLE SPAN POSITION LEVEL CACHE
+//                          CableSpan::Impl calcDataInst
 //==============================================================================
-
 const MatrixWorkspace& CableSpan::Impl::calcDataInst(
     const State& s) const
 {
@@ -2336,6 +2376,7 @@ const MatrixWorkspace& CableSpan::Impl::calcDataInst(
 
     // Axes considered when computing the path error.
     const std::array<CoordinateAxis, 2> axes{NormalAxis, BinormalAxis};
+    const std::array<CoordinateAxis, 1> normalAxis{NormalAxis};
 
     // Make sure all curve segments are realized to position stage.
     // This will transform all last computed geodesics to Ground frame, and
@@ -2382,11 +2423,13 @@ const MatrixWorkspace& CableSpan::Impl::calcDataInst(
             data.pathError);
     data.maxPathError = data.pathError.normInf();
 
-    // Only proceed with computing the jacobian and geodesic corrections if the path error is large.
-    if (data.maxPathError < getParameters().m_PathAccuracy) {
-        data.pathCorrection *= 0.;
-        return data;
-    }
+    calcPathErrorVector<1>(
+            *this,
+            s,
+            data.lineSegments,
+            normalAxis,
+            data.normalPathError);
+    data.maxNormalPathError = data.normalPathError.normInf();
 
     // Evaluate the path error jacobian to the natural geodesic corrections
     // of each curve segment.
@@ -2396,10 +2439,28 @@ const MatrixWorkspace& CableSpan::Impl::calcDataInst(
             data.lineSegments,
             axes,
             data.pathErrorJacobian);
+    calcPathErrorJacobian<1>(
+            *this,
+            s,
+            data.lineSegments,
+            normalAxis,
+            data.normalPathErrorJacobian);
+
+    const bool doNormal = data.maxNormalPathError > getParameters().m_PathAccuracy;
+    const bool doBinormal = data.maxPathError > getParameters().m_PathAccuracy;
+    if (!doNormal && !doBinormal) {
+        data.pathCorrection *= 0.;
+        return data;
+    }
 
     // Compute the geodesic corrections for each curve segment: This gives
     // us a correction vector in a direction that reduces the path error.
-    calcPathCorrections(data);
+    if (doNormal) {
+        calcNormalPathCorrections(data);
+    } else if (doBinormal) {
+        /* calcLengthCorrection(data, 0.); */
+        calcPathCorrections(data);
+    }
 
     // Compute the maximum allowed step size that we take along the
     // correction vector.
