@@ -133,6 +133,11 @@ struct MatrixWorkspace
         {
             lengthHessian  = Matrix(Q * n, Q * n, 0.);
             lengthGradient = Vector(Q * n, 0.);
+
+            static constexpr int C = NUMBER_OF_CONSTRAINTS / 2.;
+            augMat = Matrix((C+Q) * n, (Q+C) * n, 0.);
+            augVec = Vector((C+Q) * n, 0.);
+            augSol = Vector((C+Q) * n, 0.);
         }
     }
 
@@ -154,6 +159,11 @@ struct MatrixWorkspace
     Vector lengthGradient;
     Real lengthStepsize = NaN;
     FactorQTZ lengthInverse;
+
+    Matrix augMat;
+    Vector augVec;
+    Vector augSol;
+    FactorQTZ augInv;
 
     int nObstaclesInContact = -1;
 };
@@ -2627,36 +2637,43 @@ void calcLengthCorrection(MatrixWorkspace& data, Real w)
 {
     const Matrix& H = data.lengthHessian;
     const Vector& g = data.lengthGradient;
-    /* std::cout << "H = " << H << "\n"; */
-    /* std::cout << "g = " << g << "\n"; */
+
     const Matrix& J = data.normalPathErrorJacobian;
     const Vector& e = data.normalPathError;
-    /* std::cout << "J = " << J << "\n"; */
+
+    Matrix& A = data.augMat;
+    Vector& b = data.augVec;
+    Vector& z = data.augSol;
+
     Vector& q = data.pathCorrection;
 
-    data.lengthInverse = J;
-    // q = Jinv g - g
-    // Such that J * q = g
-    Vector z = q;
-    data.normalInverse.solve(J * g, z);
-    q = z - g;
-    /* std::cout << "dL-pred = " << (~g) * q << "\n"; */
+    const int offset = H.nrow();
+    for (int r = 0; r < J.nrow(); ++r) {
+        for (int c = 0; c < J.ncol(); ++c) {
+            A(r+offset, c) = J(r,c);
+        }
+        b(r + offset) = 0.;
+    }
 
-    /* std::cout << "check0 = " << J * z - (J * g) << "\n"; */
-    /* std::cout << "check1 = " << J * (q + g) << "\n"; */
+    A = A + ~A;
 
-    // Find the optimal step.
-    /* const Real qHq = std::abs((~q) * (H * q)) + std::abs(w) * ((~q) * q); */
-    const Real qHq = std::abs((~q) * ((~H)* q)) + std::abs(w) * ((~q) * q);
-    /* std::cout << "qHq = " << qHq << "\n"; */
-    /* std::cout << "q = " << q << "\n"; */
-    data.lengthStepsize = (~g) * q;
-    data.lengthStepsize *= -1.;
-    data.lengthStepsize /= qHq;
-    /* data.lengthStepsize = -((~q) * q) / qHq; */
-    /* std::cout << "alpha = " << data.lengthStepsize << "\n"; */
+    for (int r = 0; r < H.nrow(); ++r) {
+        for (int c = 0; c < H.ncol(); ++c) {
+            A(r, c) = H(r,c);
+        }
+        b(r) = -g(r);
+    }
 
-    q *= data.lengthStepsize;
+    data.augInv = A;
+    data.augInv.solve(b, z);
+
+    for (int r = 0; r < H.nrow(); ++r) {
+        q(r) = z(r);
+    }
+
+    if ( (~q) * g > 0. ) {
+        q *= -1.;
+    }
 
     const Real deltaLengthPred = (~g) * q;
     if (deltaLengthPred > 0.) {
