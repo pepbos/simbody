@@ -148,10 +148,12 @@ struct MatrixWorkspace
     Vector normalPathError;
     FactorQTZ normalInverse;
     Real maxNormalPathError = NaN;
+    bool doNormal = false;
 
     Matrix lengthHessian;
     Vector lengthGradient;
     Real lengthStepsize = NaN;
+    FactorQTZ lengthInverse;
 
     int nObstaclesInContact = -1;
 };
@@ -308,6 +310,12 @@ struct CurveSegmentData
         // contain valid data.
         ObstacleWrappingStatus wrappingStatus =
             ObstacleWrappingStatus::InitialGuess;
+
+        Vec3 calcV_P(int) const;
+        Vec3 calcV_Q(int) const;
+        Vec3 calcW_P(int) const;
+        Vec3 calcW_Q(int) const;
+
     };
     struct Pos final
     {
@@ -351,6 +359,7 @@ struct CableSpanParameters final : IntegratorTolerances
 {
     // TODO convert to angle in degrees.
     Real m_PathAccuracy       = 1e-4;
+    Real m_NormalPathAccuracy       = 1e-9;
     int m_SolverMaxIterations = 50;
     // For each curve segment the max allowed stepsize in degrees. This is
     // converted to a max allowed linear stepsize using the local radius of
@@ -1788,6 +1797,8 @@ private:
 
     CableSpanParameters parameters{};
 
+    int m_algorithm = 0;
+
     friend CableSpan;
     friend CableSubsystem;
     friend CableSubsystemTestHelper;
@@ -2294,6 +2305,285 @@ void calcPathErrorJacobian(
     };
 }
 
+}
+
+//==============================================================================
+//                          CableSpan::Impl calcDataInst
+//==============================================================================
+
+namespace {
+
+
+Vec3 CurveSegmentData::Instance::calcV_P(int i) const
+{
+    switch (i) {
+    case 0:
+        return {1., 0., 0.};
+    case 1:
+        return {0., 0., 1.};
+    case 2:
+        return {0., 0., 0.};
+    case 3:
+        return {0., 0., 0.};
+    default:
+        throw std::runtime_error("invalid index");
+    }
+}
+
+Vec3 CurveSegmentData::Instance::calcV_Q(int i) const
+{
+    switch (i) {
+    case 0:
+        return {1., 0., 0.};
+    case 1:
+        return {0., 0., jacobi_Q[0]};
+    case 2:
+        return {0., 0., jacobi_Q[1]};
+    case 3:
+        return {1., 0., 0.};
+    default:
+        throw std::runtime_error("invalid index");
+    }
+}
+
+Vec3 CurveSegmentData::Instance::calcW_P(int i) const
+{
+    switch (i) {
+    case 0:
+        return {torsion_P, 0., curvatures_P[0]};
+    case 1:
+        return {-curvatures_P[1], 0., -torsion_P};
+    case 2:
+        return {0., -1., 0.};
+    case 3:
+        return {0., 0., 0.};
+    default:
+        throw std::runtime_error("invalid index");
+    }
+}
+
+Vec3 CurveSegmentData::Instance::calcW_Q(int i) const
+{
+    switch (i) {
+    case 0:
+        return {torsion_Q, 0., curvatures_Q[0]};
+    case 1:
+        return {
+            -jacobi_Q[0] * curvatures_Q[1],
+            -jacobiDot_Q[0],
+            -jacobi_Q[0] * torsion_Q};
+    case 2:
+        return {
+            -jacobi_Q[1] * curvatures_Q[1],
+            -jacobiDot_Q[1],
+            -jacobi_Q[1] * torsion_Q};
+    case 3:
+        return {torsion_Q, 0., curvatures_Q[0]};
+    default:
+        throw std::runtime_error("invalid index");
+    }
+}
+
+std::array<SpatialVec, 4> calcV(
+    const Transform& X,
+    Vec2 curvatures,
+    Real tau,
+    Vec2 jacobi,
+    Vec2 jacobiDot,
+    bool isStart)
+{
+    const Real kn   = curvatures[0];
+    const Real kb   = curvatures[1];
+    const Real a    = jacobi[0];
+    const Real r    = jacobi[1];
+    const Real aDot = jacobiDot[0];
+    const Real rDot = jacobiDot[1];
+
+    const SpatialVec ds{
+        {tau, 0., kn},
+        { 1., 0., 0.}
+    };
+    const SpatialVec dBeta{
+        {-a * kb, -aDot, -a * tau},
+        {     0.,    0.,        a}
+    };
+    const SpatialVec dTheta{
+        {-r * kb, -rDot, -r * tau},
+        {     0.,    0.,        r}
+    };
+    const SpatialVec dL = isStart ? SpatialVec(
+                                        Vec3{
+                                            0.
+    },
+                                        Vec3{0.})
+                                  : SpatialVec{{tau, 0., kn}, {1., 0., 0.}};
+
+    return {ds, dBeta, dTheta, dL};
+}
+
+std::array<SpatialVec, 4> calcV_P(const CurveSegment& curve, const State& state)
+{
+    const CurveSegmentData::Pos& dataPos       = curve.getDataPos(state);
+    const CurveSegmentData::Instance& dataInst = curve.getDataInst(state);
+    std::array<SpatialVec, 4> out              = calcV(
+        dataPos.X_GP,
+        dataInst.curvatures_P,
+        dataInst.torsion_P,
+        {1., 0.},
+        {0., 1.},
+        true);
+    for (int i = 0; i < 4; ++i) {
+        if ((out.at(i)[0] - dataInst.calcW_P(i)).norm() > 1e-15) {
+            throw std::runtime_error("stop");
+        }
+        if ((out.at(i)[1] - dataInst.calcV_P(i)).norm() > 1e-15) {
+            throw std::runtime_error("stop");
+        }
+    }
+    return out;
+}
+
+void calcLengthGradient(
+    const State& state,
+    const CableSpan::Impl& cable,
+    const std::vector<LineSegment>& lineSegments,
+    Vector& gradient)
+{
+    constexpr int NQ = MatrixWorkspace::GEODESIC_DOF;
+    int row          = 0;
+    auto lineIt      = lineSegments.begin();
+
+    gradient *= 0;
+
+    cable.forEachActiveCurveSegment(state, [&](const CurveSegment& curve) {
+        const CurveSegmentData::Pos& dataPos       = curve.getDataPos(state);
+        const CurveSegmentData::Instance& dataInst = curve.getDataInst(state);
+
+        const Vec3 dl_P = dataPos.X_GP.RInv() * lineIt->direction;
+        const Vec3 dl_Q = -dataPos.X_GQ.RInv() * (lineIt + 1)->direction;
+
+        for (int i = 0; i < 4; ++i) {
+            const Vec3 vi_P   = dataInst.calcV_P(i);
+            const Vec3 vi_Q   = dataInst.calcV_Q(i);
+            gradient[row + i] = dot(dl_P, vi_P) + dot(dl_Q, vi_Q);
+        }
+
+        // Every fourth correction element directly effects the length.
+        gradient[row + NQ - 1] += 1.;
+
+        ++lineIt;
+        row += NQ;
+    });
+}
+
+void calcLengthHessian(
+    const State& state,
+    const CableSpan::Impl& cable,
+    const std::vector<LineSegment>& lineSegments,
+    Matrix& hessian)
+{
+    constexpr int NQ = MatrixWorkspace::GEODESIC_DOF;
+    int row          = 0;
+    int col          = 0;
+    auto lineIt      = lineSegments.begin();
+
+    hessian *= 0;
+
+    // TODO use this one.
+    auto calcDiagBlockEl = [&](Real l,
+                               const Vec3& dl,
+                               const Vec3& vi,
+                               const Vec3& vj,
+                               const Vec3& wj) {
+        return dot(vi, vj) / l - dot(vi, dl) * dot(vj, dl) / l +
+               dot(dl, cross(wj, vi));
+    };
+
+    cable.forEachActiveCurveSegment(state, [&](const CurveSegment& curve) {
+        const CurveSegmentData::Pos& dataPos = curve.getDataPos(state);
+        const CurveSegmentData::Instance& dataInst = curve.getDataInst(state);
+
+        // For initial contact point.
+        {
+            const Real l  = lineIt->length;
+            const Vec3 dl = dataPos.X_GP.RInv() * lineIt->direction;
+
+            for (int j = 0; j < NQ; ++j) {
+                const Vec3 vj = dataInst.calcV_P(j);
+                const Vec3 wj = dataInst.calcW_P(j);
+                for (int i = 0; i < NQ; ++i) {
+                    const Vec3 vi = dataInst.calcV_P(i);
+                    hessian(row + i, col + j) += dot(vi, vj) / l -
+                                                 dot(vi, dl) * dot(vj, dl) / l +
+                                                 dot(dl, cross(wj, vi));
+                }
+            }
+        }
+
+        ++lineIt;
+
+        // For final contact point.
+        {
+            const Real l  = lineIt->length;
+            const Vec3 dl = -dataPos.X_GQ.RInv() * lineIt->direction;
+
+            for (int j = 0; j < NQ - 1; ++j) {
+                const Vec3 vj = dataInst.calcV_Q(j);
+                const Vec3 wj = dataInst.calcW_Q(j);
+                for (int i = 0; i < NQ; ++i) {
+                    const Vec3 vi  = dataInst.calcV_Q(i);
+                    const Real elt = dot(vi, vj) / l -
+                                     dot(vi, dl) * dot(vj, dl) / l +
+                                     dot(dl, cross(wj, vi));
+                    hessian(row + i, col + j) += elt;
+                    // Last column equals the first row, to negate the effect
+                    // of the shift in jaobi fields.
+                    if (i == 0) {
+                        hessian(row + j, col + NQ - 1) += elt;
+                    }
+                    if (i == 0 && j == 0) {
+                        hessian(row + NQ - 1, col + NQ - 1) += elt;
+                    }
+                }
+            }
+        }
+
+        // If there is a next curve, write the off diagonal block.
+        const ObstacleIndex nextObstacleIx = curve.findNextObstacleInContactWithCable(state);
+        if (nextObstacleIx.isValid()) {
+            const Real l  = lineIt->length;
+            const Vec3 dl = lineIt->direction;
+
+            const CurveSegmentData::Pos& nextDataPos = cable.getObstacleCurveSegment(nextObstacleIx).getDataPos(state);
+            const CurveSegmentData::Instance& nextDataInst = cable.getObstacleCurveSegment(nextObstacleIx).getDataInst(state);
+
+            for (int i = 0; i < NQ; ++i) {
+                const Rotation& R_GQ = dataPos.X_GQ.R();
+                const Vec3 vi        = R_GQ * dataInst.calcV_Q(i);
+                for (int j = 0; j < NQ; ++j) {
+                    const Rotation& R_GP = nextDataPos.X_GP.R();
+                    const Vec3 vj        = R_GP * nextDataInst.calcV_P(j);
+                    hessian(row + i, col + NQ + j) =
+                        -dot(vi, vj) / l + dot(vi, dl) * dot(vj, dl) / l;
+                }
+            }
+            // The off diagonal blocks are symmetric.
+            for (int i = 0; i < NQ; ++i) {
+                for (int j = 0; j < NQ; ++j) {
+                    hessian(row + NQ + i, col + j) =
+                        hessian(row + j, col + NQ + i);
+                }
+            }
+        }
+
+        row += NQ;
+        col += NQ;
+    });
+}
+
+}
+
+namespace {
 // TODO move to top of file, and rename
 constexpr int GEODESIC_DOF          = MatrixWorkspace::GEODESIC_DOF;
 constexpr int NUMBER_OF_CONSTRAINTS = MatrixWorkspace::NUMBER_OF_CONSTRAINTS;
@@ -2335,20 +2625,46 @@ void calcNormalPathCorrections(MatrixWorkspace& data)
 
 void calcLengthCorrection(MatrixWorkspace& data, Real w)
 {
-    data.normalInverse = data.normalPathErrorJacobian;
-    // Such that J * q = g
-    // q = Jinv g - g
+    const Matrix& H = data.lengthHessian;
+    const Vector& g = data.lengthGradient;
+    /* std::cout << "H = " << H << "\n"; */
+    /* std::cout << "g = " << g << "\n"; */
+    const Matrix& J = data.normalPathErrorJacobian;
+    const Vector& e = data.normalPathError;
+    /* std::cout << "J = " << J << "\n"; */
     Vector& q = data.pathCorrection;
-    data.normalInverse.solve(data.lengthGradient, q);
-    q -= data.lengthGradient;
+
+    data.lengthInverse = J;
+    // q = Jinv g - g
+    // Such that J * q = g
+    Vector z = q;
+    data.normalInverse.solve(J * g, z);
+    q = z - g;
+    /* std::cout << "dL-pred = " << (~g) * q << "\n"; */
+
+    /* std::cout << "check0 = " << J * z - (J * g) << "\n"; */
+    /* std::cout << "check1 = " << J * (q + g) << "\n"; */
 
     // Find the optimal step.
-    const Matrix& H = data.lengthHessian;
-    const Matrix& g = data.lengthGradient;
-    const Real qHq = (~q) * (H * q) + w;
-    data.lengthStepsize = -(~q * q) / qHq;
+    /* const Real qHq = std::abs((~q) * (H * q)) + std::abs(w) * ((~q) * q); */
+    const Real qHq = std::abs((~q) * ((~H)* q)) + std::abs(w) * ((~q) * q);
+    /* std::cout << "qHq = " << qHq << "\n"; */
+    /* std::cout << "q = " << q << "\n"; */
+    data.lengthStepsize = (~g) * q;
+    data.lengthStepsize *= -1.;
+    data.lengthStepsize /= qHq;
+    /* data.lengthStepsize = -((~q) * q) / qHq; */
+    /* std::cout << "alpha = " << data.lengthStepsize << "\n"; */
 
     q *= data.lengthStepsize;
+
+    const Real deltaLengthPred = (~g) * q;
+    if (deltaLengthPred > 0.) {
+        throw std::runtime_error("stop, wrong direction");
+    }
+
+    /* std::cout << "check2 = " << H * q + g << "\n"; */
+    /* std::cout << "dL-pred = " << (~g) * q << "\n"; */
 }
 
 // Obtain iterator over the Correction per curve segment.
@@ -2446,20 +2762,22 @@ const MatrixWorkspace& CableSpan::Impl::calcDataInst(
             normalAxis,
             data.normalPathErrorJacobian);
 
-    const bool doNormal = data.maxNormalPathError > getParameters().m_PathAccuracy;
+    calcLengthGradient(s, *this, data.lineSegments, data.lengthGradient);
+    calcLengthHessian(s, *this, data.lineSegments, data.lengthHessian);
+
+    const bool doNormal = (data.doNormal = data.maxNormalPathError > getParameters().m_NormalPathAccuracy);
     const bool doBinormal = data.maxPathError > getParameters().m_PathAccuracy;
     if (!doNormal && !doBinormal) {
         data.pathCorrection *= 0.;
         return data;
     }
 
-    // Compute the geodesic corrections for each curve segment: This gives
-    // us a correction vector in a direction that reduces the path error.
     if (doNormal) {
         calcNormalPathCorrections(data);
-    } else if (doBinormal) {
-        /* calcLengthCorrection(data, 0.); */
+    } else if (m_algorithm == 0) {
         calcPathCorrections(data);
+    } else {
+        calcLengthCorrection(data, data.maxPathError + 1e-8);
     }
 
     // Compute the maximum allowed step size that we take along the
@@ -2491,6 +2809,7 @@ const CableSpanData::Pos& CableSpan::Impl::calcDataPos(const State& s)
     dataPos.terminationPoint_G = calcTerminationPointInGround(s);
 
     dataPos.loopIter = 0;
+    Real prevLength = NaN;
     while (true) {
         const MatrixWorkspace& data = calcDataInst(s);
 
@@ -2509,6 +2828,18 @@ const CableSpanData::Pos& CableSpan::Impl::calcDataPos(const State& s)
             break;
         }
 
+        Real length = calcTotalCableLength(*this, s, data.lineSegments);
+        /* if (!data.doNormal) { */
+        /*     if (prevLength < length) { */
+        /*         /1* std::cout << "prevLength = " << prevLength << "\n"; *1/ */
+        /*         /1* std::cout << "length = " << length << "\n"; *1/ */
+        /*         /1* std::cout << "delta length = " << prevLength - length << "\n"; *1/ */
+        /*         /1* std::cout << "\n"; *1/ */
+        /*         /1* throw std::runtime_error("stop"); *1/ */
+        /*     } */
+        /* } */
+        prevLength = length;
+
         const Correction* corrIt = getPathCorrections(data);
         forEachActiveCurveSegment(s, [&](const CurveSegment& curve) {
             curve.applyGeodesicCorrection(s, *corrIt);
@@ -2523,7 +2854,9 @@ const CableSpanData::Pos& CableSpan::Impl::calcDataPos(const State& s)
             curve.invalidatePosEntry(s);
         }
 
-        ++dataPos.loopIter;
+        if (!data.doNormal) {
+            ++dataPos.loopIter;
+        }
     }
 
     return dataPos;
