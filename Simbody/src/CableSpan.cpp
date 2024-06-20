@@ -139,6 +139,23 @@ struct MatrixWorkspace
             augVec = Vector((C+Q) * n, 0.);
             augSol = Vector((C+Q) * n, 0.);
         }
+
+        {
+            conA  = Matrix(Q * n / 2, Q / 2 * n, 0.);
+            conB  = Matrix(Q * n / 2, Q / 2 * n, 0.);
+            conE  = Vector(Q * n, 0.);
+            conAInv  = Matrix(Q * n / 2, Q / 2 * n, 0.);
+
+            SA  = Matrix(Q * n, Q / 2 * n, 0.);
+            SB  = Matrix(Q * n, Q / 2 * n, 0.);
+
+            // if: q = K * [b, theta], then JN * q = 0 ---> JN * K = 0
+            conKernel  = Matrix(Q * n, Q / 2 * n, 0.);
+
+            conMat  = Matrix(Q * n / 2, Q / 2 * n, 0.);
+            conVec  = Vector(Q * n / 2, 0.);
+            conSol  = Vector(Q * n / 2, 0.);
+        }
     }
 
     std::vector<LineSegment> lineSegments;
@@ -165,8 +182,50 @@ struct MatrixWorkspace
     Vector augSol;
     FactorQTZ augInv;
 
+    Matrix SA;
+    Matrix SB;
+    Matrix conKernel;
+    Matrix conA;
+    Matrix conB;
+    Matrix conAInv;
+    Matrix conMat;
+    Vector conVec;
+    Vector conSol;
+    Vector conE;
+    FactorQTZ conInv;
+    FactorQTZ conInvForA;
+
     int nObstaclesInContact = -1;
 };
+
+std::ostream& operator<<(std::ostream &os, const MatrixWorkspace& dataInst) {
+    os << "MatrixWorkspace[" << dataInst.nObstaclesInContact << "] {\n";
+    os << "    pathErrorJacobian: " << dataInst.pathErrorJacobian << "\n";
+    os << "    pathError:         " << dataInst.pathError << "\n";
+    os << "    pathCorrection:    " << dataInst.pathCorrection << "\n";
+    os << "    maxPathError:      " << dataInst.maxPathError << "\n";
+    os << ",\n";
+    os << "    normalPathErrorJacobian: " << dataInst.normalPathErrorJacobian << "\n";
+    os << "    normalPathError:         " << dataInst.normalPathError << "\n";
+    os << "    normalMaxPathError:      " << dataInst.normalPathError << "\n";
+    os << "    normalDo          :      " << dataInst.doNormal << "\n";
+    /* os << ",\n"; */
+    os << "    SA: " << dataInst.SA << "\n";
+    os << "    SB: " << dataInst.SB << "\n";
+    os << "    kernel: " << dataInst.conKernel << "\n";
+    os << "    JN * B = " << dataInst.normalPathErrorJacobian * dataInst.conKernel << "\n";
+    os << ",\n";
+    /* os << "    conA:    " << dataInst.conA << "\n"; */
+    /* os << "    conB:    " << dataInst.conB << "\n"; */
+    /* os << "    conAInvB:" << dataInst.conAInv << "\n"; */
+    os << "    conMat:" << dataInst.conMat << "\n";
+    os << "    conVec:" << dataInst.conVec << "\n";
+    os << "    conSol:" << dataInst.conSol << "\n";
+    os << "    deltaLPred:" << (~dataInst.lengthGradient) * dataInst.pathCorrection  << "\n";
+
+    os << "}\n";
+    return os;
+}
 
 //------------------------------------------------------------------------------
 //                    Natural geodesic correction vector
@@ -369,7 +428,7 @@ struct CableSpanParameters final : IntegratorTolerances
 {
     // TODO convert to angle in degrees.
     Real m_PathAccuracy       = 1e-4;
-    Real m_NormalPathAccuracy       = 1e-9;
+    Real m_NormalPathAccuracy       = 1e-6;
     int m_SolverMaxIterations = 50;
     // For each curve segment the max allowed stepsize in degrees. This is
     // converted to a max allowed linear stepsize using the local radius of
@@ -2684,6 +2743,41 @@ void calcLengthCorrection(MatrixWorkspace& data, Real w)
     /* std::cout << "dL-pred = " << (~g) * q << "\n"; */
 }
 
+void calcContourCorrection(MatrixWorkspace& data)
+{
+    std::cout << "calcContourCorrection\n";
+    const Matrix& H = data.lengthHessian;
+    const Vector& g = data.lengthGradient;
+
+    const Matrix& J = data.normalPathErrorJacobian;
+    const Vector& e = data.normalPathError;
+
+    const Matrix& B = data.conKernel;
+
+    Vector& q = data.pathCorrection;
+
+    /* data.conMat = (~B) * H * B; // + (~B) * B * data.maxPathError * 0.; */
+    /* data.conVec = (~B) * g; */
+    /* data.conInv.solve(data.conVec, data.conSol); */
+    data.conVec = H * data.conE - g;
+    data.conInv = H * B;
+    data.conInv.solve(g, data.conSol);
+    q = B * data.conSol;
+
+    /* std::cout << "H * B * z - g = " << H * B * data.conSol - g << "\n"; */
+    /* std::cout << "H * B * z - g = " << (~B) * (H * B * data.conSol - g) << "\n"; */
+
+    const Real deltaLengthPred = (~g) * q;
+    if ( deltaLengthPred > 0.) {
+        q *= -1.;
+    }
+
+    std::cout << "q comp = " << q << "\n";
+    std::cout << "z conS = " << data.conSol << "\n";
+    std::cout << "J * q  = " << J * q << "\n";
+    std::cout << "g * q  = " << (~g) * q << "\n";
+}
+
 // Obtain iterator over the Correction per curve segment.
 const Correction* getPathCorrections(const MatrixWorkspace& data)
 {
@@ -2695,6 +2789,41 @@ const Correction* getPathCorrections(const MatrixWorkspace& data)
         throw std::runtime_error("Invalid size of path corrections vector.");
     }
     return reinterpret_cast<const Correction*>(&data.pathCorrection[0]);
+}
+
+void calcContourConstraints(MatrixWorkspace& data)
+{
+    const int Q = GEODESIC_DOF;
+    /* for (int r = 0; r < data.normalPathErrorJacobian.nrow(); ++r) { */
+    /*     int c_J = -1; */
+    /*     int c_A = -1; */
+    /*     int c_B = -1; */
+    /*     for (int i = 0; i < data.nObstaclesInContact; ++i) { */
+    /*         data.conA(r, ++c_A) = data.normalPathErrorJacobian(r, ++c_J); */
+    /*         data.conB(r, ++c_B) = data.normalPathErrorJacobian(r, ++c_J); */
+    /*         data.conB(r, ++c_B) = data.normalPathErrorJacobian(r, ++c_J); */
+    /*         data.conA(r, ++c_A) = data.normalPathErrorJacobian(r, ++c_J); */
+
+    /*     } */
+    /* } */
+    int c = -1;
+    for (int i = 0; i < data.nObstaclesInContact; ++i) {
+        int r = i * Q - 1;
+        data.SA(++r, ++c) = 1.;
+        data.SB(++r, c) = 1.;
+        data.SB(++r, ++c) = 1.;
+        data.SA(++r, c) = 1.;
+    }
+
+    data.conA = data.normalPathErrorJacobian * data.SA;
+    data.conB = data.normalPathErrorJacobian * data.SB;
+
+    data.conInvForA = data.conA;
+    data.conInvForA.inverse(data.conAInv);
+
+    data.conKernel = -data.SA * data.conAInv * data.conB + data.SB;
+    data.conE = data.SA * data.conAInv * data.normalPathError;
+
 }
 
 } // namespace
@@ -2782,19 +2911,32 @@ const MatrixWorkspace& CableSpan::Impl::calcDataInst(
     calcLengthGradient(s, *this, data.lineSegments, data.lengthGradient);
     calcLengthHessian(s, *this, data.lineSegments, data.lengthHessian);
 
-    const bool doNormal = (data.doNormal = data.maxNormalPathError > getParameters().m_NormalPathAccuracy);
+    calcContourConstraints(data);
+
+    data.doNormal = data.maxNormalPathError > getParameters().m_NormalPathAccuracy;
     const bool doBinormal = data.maxPathError > getParameters().m_PathAccuracy;
-    if (!doNormal && !doBinormal) {
+    if (!data.doNormal && !doBinormal) {
         data.pathCorrection *= 0.;
         return data;
     }
 
-    if (doNormal) {
+    /* auto chooseAlgo = [&](int alg) -> void { */
+    /*     switch (alg) { */
+    /*     case 0: return calcPathCorrections(data); */
+    /*     case 1: return calcLengthCorrection(data, data.maxPathError * 1e-8); */
+    /*     case 2: return calcContourCorrection(data); */
+    /*     default: std::runtime_error("unknown algorithm"); */
+    /*     } */
+    /* }; */
+
+    if (data.doNormal) {
         calcNormalPathCorrections(data);
-    } else if (m_algorithm == 0) {
-        calcPathCorrections(data);
+        /* calcPathCorrections(data); */
     } else {
-        calcLengthCorrection(data, data.maxPathError + 1e-8);
+        /* chooseAlgo(0); */
+        /* calcPathCorrections(data); */
+        /* calcLengthCorrection(data, data.maxPathError); */
+        calcContourCorrection(data);
     }
 
     // Compute the maximum allowed step size that we take along the
@@ -2837,25 +2979,30 @@ const CableSpanData::Pos& CableSpan::Impl::calcDataPos(const State& s)
         if (data.nObstaclesInContact == 0
             || data.pathCorrection.normInf() < 1e-16
             || dataPos.loopIter >= getParameters().m_SolverMaxIterations) {
+                std::cout << data << "\n";
             // Update cache entry and stop solver.
             dataPos.pathError = data.maxPathError;
             dataPos.cableLength = calcTotalCableLength(*this, s, data.lineSegments);
             dataPos.originTangent_G      = data.lineSegments.front().direction;
             dataPos.terminationTangent_G = data.lineSegments.back().direction;
+            std::cout << "CONVERGED IN: " << dataPos.loopIter << "\n\n";
             break;
         }
 
-        Real length = calcTotalCableLength(*this, s, data.lineSegments);
+        /* Real length = calcTotalCableLength(*this, s, data.lineSegments); */
         /* if (!data.doNormal) { */
-        /*     if (prevLength < length) { */
-        /*         /1* std::cout << "prevLength = " << prevLength << "\n"; *1/ */
-        /*         /1* std::cout << "length = " << length << "\n"; *1/ */
-        /*         /1* std::cout << "delta length = " << prevLength - length << "\n"; *1/ */
-        /*         /1* std::cout << "\n"; *1/ */
-        /*         /1* throw std::runtime_error("stop"); *1/ */
+        /*     /1* if (dataPos.loopIter == 0) { *1/ */
+        /*         /1* std::cout << data << "\n"; *1/ */
+        /*     /1* } *1/ */
+        /*     std::cout << "iter = " << dataPos.loopIter << ", "; */
+        /*     std::cout << "delta length = " << length - prevLength << ", "; */
+        /*     if (length > prevLength + 1e-5) { */
+        /*         std::cout << "moving up hill!!\n"; */
         /*     } */
+        /*     std::cout << "\n"; */
+        /*     std::cout << "\n"; */
         /* } */
-        prevLength = length;
+        /* prevLength = length; */
 
         const Correction* corrIt = getPathCorrections(data);
         forEachActiveCurveSegment(s, [&](const CurveSegment& curve) {
