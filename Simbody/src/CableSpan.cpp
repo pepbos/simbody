@@ -2211,6 +2211,103 @@ void calcPathErrorVector(
 namespace
 {
 
+struct JacobianHelper
+{
+    Real calcLengthHessianDiagBlockElt(
+            const JacobianHelper& other) const
+    {
+        const Real c0_0 = v == other.v ? 1. : 0.;
+        const Real c0_1 = e[v] * e[other.v];
+        const Real c0 = k * other.k * (c0_0 - c0_1) / l;
+        const Real c1 = -cross(other.w, e)[v] * k;
+        const Real c2 = e[v] * kDot;
+        return c0 + c1 + c2;
+    }
+
+    Real calcLengthHessianOffDiagBlockElt(
+            const JacobianHelper& other) const
+    {
+        return dot(cross(e, Vec3(v)), cross(other.e, Vec3(other.v))) * k * other.k;
+    }
+
+    Real calcPathErrorVectorElt(CoordinateAxis axis) const
+    {
+        return e[axis];
+    }
+
+    Real calcPathErrorJacobianDiagElt(CoordinateAxis axis) const
+    {
+        const Real c0 = k * e[v] * e[axis] / l;
+        const Real c1 = -cross(w, e)[axis];
+        return c0 + c1;
+    }
+
+    Real calcPathErrorJacobianOffDiagElt( const JacobianHelper& other, CoordinateAxis axis) const
+    {
+        return dot(cross(e, Vec3(v)), cross(other.e, Vec3(axis))) * k * other.k;
+    }
+
+    JacobianHelper(CoordinateAxis dxDir, Real dxMag, Real dxMagDot, const Vec3& angularVelocity, const LineSegment& line, Real sign = 1.) :
+        v(dxDir),
+        k(dxMag),
+        kDot(dxMagDot),
+        w(angularVelocity),
+        e(line.direction * sign),
+        l(line.length)
+    {}
+
+    static JacobianHelper CalcDerivsAtP(const LineSegment& line_P, Vec2 k, Real tau, int ix) {
+        switch (ix) {
+            case 0: return {TangentAxis, 1., 0., {-tau, 0., -k[0]}, line_P};
+            case 1: return {BinormalAxis, 1., 0., {-k[1], 0., -tau}, line_P};
+            case 2: return {BinormalAxis, 0., 0., {0., -1., 0.}, line_P};
+            case 3: return {TangentAxis, 0., 0., {0., 0., 0.}, line_P};
+            default: throw std::runtime_error("stop");
+        }
+    }
+
+    static JacobianHelper CalcDerivsAtQ(const LineSegment& line_Q, Vec2 k, Real tau, Vec2 a, Vec2 aDot, int ix) {
+        switch (ix) {
+            case 0: return {TangentAxis, 1., 0., {-tau, 0., -k[0]}, line_Q, -1.};
+            case 1: return {BinormalAxis, a[0], aDot[0], {-a[0] * k[1], -aDot[0], -a[0] * tau}, line_Q, -1.};
+            case 2: return {BinormalAxis, a[1], aDot[1], {-a[1] * k[1], -aDot[1], -a[1] * tau}, line_Q, -1.};
+            case 3: return {TangentAxis, 1., 0., {-tau, 0., -k[0]}, line_Q, -1.};
+            default: throw std::runtime_error("stop");
+        }
+    }
+
+    static std::array<JacobianHelper, 4> CalcAtP(const CurveSegment& curve, const State& state)
+    {
+        const CurveSegmentData::Instance& dataInst = curve.getDataInst(state);
+        const LineSegment line_P(Vec3{NaN}, Vec3{NaN}); // TODO
+        return {
+            JacobianHelper::CalcDerivsAtP(line_P, dataInst.curvatures_P, dataInst.torsion_P, 0),
+            JacobianHelper::CalcDerivsAtP(line_P, dataInst.curvatures_P, dataInst.torsion_P, 1),
+            JacobianHelper::CalcDerivsAtP(line_P, dataInst.curvatures_P, dataInst.torsion_P, 2),
+            JacobianHelper::CalcDerivsAtP(line_P, dataInst.curvatures_P, dataInst.torsion_P, 3),
+        };
+    }
+
+    static std::array<JacobianHelper, 4> CalcAtQ(const CurveSegment& curve, const State& state)
+    {
+        const CurveSegmentData::Instance& dataInst = curve.getDataInst(state);
+        const LineSegment line_Q(Vec3{NaN}, Vec3{NaN}); // TODO
+        return {
+            JacobianHelper::CalcDerivsAtQ(line_Q, dataInst.curvatures_Q, dataInst.torsion_Q, dataInst.jacobi_Q, dataInst.jacobiDot_Q, 0),
+            JacobianHelper::CalcDerivsAtQ(line_Q, dataInst.curvatures_Q, dataInst.torsion_Q, dataInst.jacobi_Q, dataInst.jacobiDot_Q, 1),
+            JacobianHelper::CalcDerivsAtQ(line_Q, dataInst.curvatures_Q, dataInst.torsion_Q, dataInst.jacobi_Q, dataInst.jacobiDot_Q, 2),
+            JacobianHelper::CalcDerivsAtQ(line_Q, dataInst.curvatures_Q, dataInst.torsion_Q, dataInst.jacobi_Q, dataInst.jacobiDot_Q, 3),
+        };
+    }
+
+    CoordinateAxis v = NormalAxis;
+    Real k;
+    Real kDot;
+    Vec3 w;
+    Vec3 e;
+    Real l;
+};
+
 Vec4 calcJacobianOfPrevPathError(
     const CurveSegment& curve,
     const State& state,
