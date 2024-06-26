@@ -1851,13 +1851,15 @@ private:
         // corrections for the CurveSegments until the pathErrorVector is small
         // enough.
         dataPos.loopIter = 0;
+        int normalLoopIter = 0;
         while (true) {
             // Compute all data required for updating the CableSpanData::Pos
             // cache.
             const MatrixWorkspace& data = calcDataInst(s);
 
             const bool doNormalCorrection =
-                data.normalPathError.normInf() > getParameters().m_pathAccuracy;
+                (data.normalPathError.normInf() > getParameters().m_pathAccuracy) &&
+                (normalLoopIter < getParameters().m_solverMaxNormalIterations);
             const bool doBinormalCorrection =
                 data.pathError.normInf() > getParameters().m_pathAccuracy;
 
@@ -1868,9 +1870,8 @@ private:
             bool exitSolver = false;
             exitSolver |= data.nObstaclesInContact == 0;
             exitSolver |= !doNormalCorrection && !doBinormalCorrection;
-            exitSolver |=
-                (dataPos.loopIter >= getParameters().m_solverMaxIterations) &&
-                !doNormalCorrection;
+            exitSolver |= !doNormalCorrection &&
+                (dataPos.loopIter >= getParameters().m_solverMaxIterations);
 
             if (exitSolver) {
                 // Update cache entry and stop solver.
@@ -1903,6 +1904,8 @@ private:
 
             if (!doNormalCorrection) {
                 ++dataPos.loopIter;
+            } else {
+                ++normalLoopIter;
             }
         }
 
