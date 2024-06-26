@@ -2540,11 +2540,10 @@ void calcPathCorrectionsDisableBeta(MatrixWorkspace& data, int disabledIndex)
     Matrix J(
             data.pathErrorJacobian.nrow(),
             data.pathErrorJacobian.ncol() - 1, NaN);
-
     {
-        int col = 0;
         const int disabledCol = disabledIndex * c_GeodesicDOF + 1;
         for (int r = 0; r < data.pathErrorJacobian.nrow(); ++r) {
+            int col = 0;
             for (int c = 0; c < data.pathErrorJacobian.ncol(); ++c) {
                 if (c == disabledCol) {continue;}
                 J(r, col) = data.pathErrorJacobian(r,c);
@@ -2554,6 +2553,7 @@ void calcPathCorrectionsDisableBeta(MatrixWorkspace& data, int disabledIndex)
     }
 
     Vector c(data.pathCorrection.nrow() - 1, NaN);
+
     FactorQTZ inv(J);
     inv.solve(data.pathError, c);
     c *= -1.;
