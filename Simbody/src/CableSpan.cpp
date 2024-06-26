@@ -1664,6 +1664,9 @@ public:
         const State& state,
         Array_<DecorativeGeometry>& decorations) const
     {
+        const Real lineOpacity = getParameters().opacity;
+        if (lineOpacity == 0.) {return;}
+
         auto calcMixer = [&](Real yMin, Real yMax, Real y) -> Real {
             return std::abs(yMax - yMin) < 1e-13 ? 0.5
                                                  : (y - yMin) / (yMax - yMin);
@@ -1684,7 +1687,7 @@ public:
             /* const Vec3 color = colorMixer * Red + (1. - colorMixer) * Green; */
             const Vec3 color = Gray;
 
-            constexpr int c_LineThickness = 2;
+            const Real c_LineThickness = 2. * lineOpacity;
 
             bool isFirstPoint = true;
             Vec3 prevPoint_G{NaN};
@@ -1695,7 +1698,7 @@ public:
                     decorations.push_back(
                         DecorativeLine(prevPoint_G, nextPoint_G)
                             .setColor(color)
-                            .setLineThickness(c_LineThickness));
+                            .setLineThickness(c_LineThickness).setOpacity(lineOpacity));
                 }
                 prevPoint_G  = nextPoint_G;
                 isFirstPoint = false;
