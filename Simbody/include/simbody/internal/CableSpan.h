@@ -241,6 +241,8 @@ public:
     /** Set the maximum number of solver iterations for finding the optimal
     path. **/
     void setSolverMaxIterations(int maxIterations);
+    void setSolverMaxNormalIterations(int maxIterations);
+    void setDisableBeta(CableSpanObstacleIndex obstacle);
 
     // TODO merge with surface constraint tolerance above?
     Real getPathErrorAccuracy() const;

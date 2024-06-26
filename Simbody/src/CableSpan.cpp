@@ -384,6 +384,9 @@ struct CableSpanParameters final : IntegratorTolerances
     // TODO convert to angle in degrees.
     Real m_pathAccuracy       = 1e-4;
     int m_solverMaxIterations = 50;
+    int m_solverMaxNormalIterations = 50;
+    CableSpanObstacleIndex obstacleDisabledBeta = CableSpanObstacleIndex::Invalid();
+
     // For each curve segment the max allowed stepsize in degrees. This is
     // converted to a max allowed linear stepsize using the local radius of
     // curvature.
@@ -3115,6 +3118,16 @@ int CableSpan::getSolverMaxIterations() const
 void CableSpan::setSolverMaxIterations(int maxIterations)
 {
     updImpl().updParameters().m_solverMaxIterations = maxIterations;
+}
+
+void CableSpan::setSolverMaxNormalIterations(int maxIterations)
+{
+    updImpl().updParameters().m_solverMaxNormalIterations = maxIterations;
+}
+
+void CableSpan::setDisableBeta(CableSpanObstacleIndex obstacle)
+{
+    updImpl().updParameters().obstacleDisabledBeta = obstacle;
 }
 
 Real CableSpan::getPathErrorAccuracy() const
