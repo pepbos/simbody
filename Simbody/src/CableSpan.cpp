@@ -2501,6 +2501,52 @@ void calcPathCorrections(MatrixWorkspace& data)
     data.pathCorrection *= -1.;
 }
 
+void calcPathCorrectionsDisableBeta(MatrixWorkspace& data, int disabledIndex)
+{
+    for (int i = 0; i < data.nObstaclesInContact; ++i) {
+        int r = data.nObstaclesInContact *
+                    MatrixWorkspace::c_NumPathErrorConstraints +
+                i;
+        int c = c_GeodesicDOF * (i + 1) - 1;
+        data.pathErrorJacobian.set(r, c, data.maxPathError);
+    }
+
+    Matrix J(
+            data.pathErrorJacobian.nrow(),
+            data.pathErrorJacobian.ncol() - 1, NaN);
+
+    {
+        int col = 0;
+        const int disabledCol = disabledIndex * c_GeodesicDOF + 1;
+        for (int r = 0; r < data.pathErrorJacobian.nrow(); ++r) {
+            for (int c = 0; c < data.pathErrorJacobian.ncol(); ++c) {
+                if (c == disabledCol) {continue;}
+                J(r, col) = data.pathErrorJacobian(r,c);
+                ++col;
+            }
+        }
+    }
+
+    Vector c(data.pathCorrection.nrow() - 1, NaN);
+    FactorQTZ inv(J);
+    inv.solve(data.pathError, c);
+    c *= -1.;
+
+    {
+        const int disabledRow = disabledIndex * c_GeodesicDOF + 1;
+        int row = 0;
+        for (int r = 0; r < data.pathCorrection.nrow(); ++r) {
+                if (r == disabledRow) {
+                    data.pathCorrection(r) = 0.;
+                } else {
+                    data.pathCorrection(r) = c(row);
+                    ++row;
+                }
+            }
+        }
+    }
+}
+
 // Solve for the geodesic corrections by attempting to set the path error to
 // zero. We call this after having filled in the pathError vector and pathError
 // jacobian in the MatrixWorkspace. The result is a vector of Corrections for
