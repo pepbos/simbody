@@ -192,6 +192,8 @@ public:
             const ContactGeometry::GeodesicKnotPoint& geodesicKnot_S,
             const Transform& X_GS)>& sink) const;
 
+    Real getObstacleBoundaryFrames(const State& state, CableSpanObstacleIndex ix, const std::function<void(const Transform&, const Transform&)>& sink) const;
+
     /** Disable contact between the obstacle and this CableSpan.
     State must be realized to Stage::Instance.
     Does nothing if the obstacle was already disabled. Otherwise this method

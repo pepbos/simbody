@@ -17,6 +17,7 @@
  ----------------------------------------------------------------------------*/
 
 #include "simbody/internal/CableSpan.h"
+#include <stdexcept>
 
 #include "SimTKcommon/internal/State.h"
 #include "simbody/internal/MultibodySystem.h"
@@ -3163,6 +3164,14 @@ void CableSpan::calcCurveSegmentKnots(
 {
     getImpl().realizePosition(state);
     getImpl().getObstacleCurveSegment(ix).calcGeodesicKnots(state, sink);
+}
+
+Real CableSpan::getObstacleBoundaryFrames(const State& state, CableSpanObstacleIndex ix, const std::function<void(const Transform&, const Transform&)>& sink) const
+{
+    getImpl().realizePosition(state);
+    const CurveSegmentData::Pos& dataPos = getImpl().getObstacleCurveSegment(ix).getDataPos(state);
+    sink(dataPos.X_GP, dataPos.X_GQ);
+    return getImpl().getObstacleCurveSegment(ix).getDataInst(state).length;
 }
 
 Real CableSpan::getSurfaceConstraintTolerance() const
