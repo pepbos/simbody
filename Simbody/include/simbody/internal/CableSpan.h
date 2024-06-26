@@ -243,6 +243,8 @@ public:
     void setSolverMaxIterations(int maxIterations);
     void setSolverMaxNormalIterations(int maxIterations);
     void setDisableBeta(CableSpanObstacleIndex obstacle);
+    void setColor(const Vec3& color);
+    void setOpacity(Real opacity);
 
     // TODO merge with surface constraint tolerance above?
     Real getPathErrorAccuracy() const;

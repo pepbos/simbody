@@ -386,6 +386,8 @@ struct CableSpanParameters final : IntegratorTolerances
     int m_solverMaxIterations = 50;
     int m_solverMaxNormalIterations = 50;
     CableSpanObstacleIndex obstacleDisabledBeta = CableSpanObstacleIndex::Invalid();
+    Vec3 color = Purple;
+    Real opacity = 1.;
 
     // For each curve segment the max allowed stepsize in degrees. This is
     // converted to a max allowed linear stepsize using the local radius of
@@ -2501,6 +2503,23 @@ void calcPathCorrections(MatrixWorkspace& data)
     data.pathCorrection *= -1.;
 }
 
+int findDisabledIndex(
+    const CableSpan::Impl& cable, const State& state)
+{
+    int ix = 0;
+    int disabledIx = -1;
+    for (ObstacleIndex ix(0); ix < cable.getNumObstacles(); ++ix) {
+        if (!cable.getObstacleCurveSegment(ix).isInContactWithSurface(state))
+        { continue;}
+
+        if (cable.getParameters().obstacleDisabledBeta == ix) {
+            disabledIx = ix;
+        }
+        ++ix;
+    }
+    return disabledIx;
+}
+
 void calcPathCorrectionsDisableBeta(MatrixWorkspace& data, int disabledIndex)
 {
     for (int i = 0; i < data.nObstaclesInContact; ++i) {
@@ -2543,7 +2562,6 @@ void calcPathCorrectionsDisableBeta(MatrixWorkspace& data, int disabledIndex)
                     ++row;
                 }
             }
-        }
     }
 }
 
@@ -2645,7 +2663,12 @@ const MatrixWorkspace& CableSpan::Impl::calcDataInst(const State& s) const
 
     // Compute the geodesic corrections for each curve segment: This gives
     // us a correction vector in a direction that reduces the path error.
-    calcPathCorrections(data);
+    if (getParameters().obstacleDisabledBeta.isValid()) {
+        int disabledIx = findDisabledIndex(*this, s);
+        calcPathCorrectionsDisableBeta(data, disabledIx);
+    } else {
+        calcPathCorrections(data);
+    }
     calcNormalPathCorrections(data);
 
     // Compute the maximum allowed step size that we take along the
@@ -3174,6 +3197,16 @@ void CableSpan::setSolverMaxNormalIterations(int maxIterations)
 void CableSpan::setDisableBeta(CableSpanObstacleIndex obstacle)
 {
     updImpl().updParameters().obstacleDisabledBeta = obstacle;
+}
+
+void CableSpan::setColor(const Vec3& color)
+{
+    updImpl().updParameters().color= color;
+}
+
+void CableSpan::setOpacity(Real opacity)
+{
+    updImpl().updParameters().opacity = opacity;
 }
 
 Real CableSpan::getPathErrorAccuracy() const
