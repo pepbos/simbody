@@ -430,6 +430,7 @@ struct CableSpanParameters final : IntegratorTolerances
     Real m_PathAccuracy       = 1e-4;
     Real m_NormalPathAccuracy       = 1e-6;
     int m_SolverMaxIterations = 50;
+    bool doMinLen = false;
     // For each curve segment the max allowed stepsize in degrees. This is
     // converted to a max allowed linear stepsize using the local radius of
     // curvature.
@@ -3030,10 +3031,14 @@ const MatrixWorkspace& CableSpan::Impl::calcDataInst(
         calcNormalPathCorrections(data);
         /* calcPathCorrections(data); */
     } else {
+        if (getParameters().doMinLen) {
+            calcContourCorrection(data);
+        } else {
+            calcPathCorrections(data);
+        }
+
         /* chooseAlgo(0); */
-        /* calcPathCorrections(data); */
         /* calcLengthCorrection(data, data.maxPathError); */
-        calcContourCorrection(data);
     }
 
     // Compute the maximum allowed step size that we take along the
@@ -3573,6 +3578,11 @@ int CableSpan::getSolverMaxIterations() const
 void CableSpan::setSolverMaxIterations(int maxIterations)
 {
     updImpl().updParameters().m_SolverMaxIterations = maxIterations;
+}
+
+void CableSpan::setMinLengthSolver()
+{
+    updImpl().updParameters().doMinLen = true;
 }
 
 Real CableSpan::getPathErrorAccuracy() const
