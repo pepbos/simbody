@@ -194,6 +194,15 @@ public:
 
     Real getObstacleBoundaryFrames(const State& state, CableSpanObstacleIndex ix, const std::function<void(const Transform&, const Transform&)>& sink) const;
 
+    enum class Algorithm
+    {
+        Scholz2015,
+        ContourOnly,
+        BlockedBeta,
+        MinLength,
+    };
+    void setAlgorithm(Algorithm Algorithm);
+
     /** Disable contact between the obstacle and this CableSpan.
     State must be realized to Stage::Instance.
     Does nothing if the obstacle was already disabled. Otherwise this method

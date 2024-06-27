@@ -27,6 +27,7 @@ using namespace SimTK;
 
 // For convenience.
 using ObstacleIndex = CableSpanObstacleIndex;
+using Algorithm = CableSpan::Algorithm;
 
 //==============================================================================
 //                            Data Structures
@@ -389,6 +390,7 @@ struct CableSpanParameters final : IntegratorTolerances
     CableSpanObstacleIndex obstacleDisabledBeta = CableSpanObstacleIndex::Invalid();
     Vec3 color = Purple;
     Real opacity = 1.;
+    Algorithm algorithm;
 
     // For each curve segment the max allowed stepsize in degrees. This is
     // converted to a max allowed linear stepsize using the local radius of
@@ -1686,9 +1688,9 @@ public:
             /*               getSubsystem().getImpl().getMaxPathError(state), */
             /*               getDataPos(state).maxPathError); */
             /* const Vec3 color = colorMixer * Red + (1. - colorMixer) * Green; */
-            const Vec3 color = Gray;
+            const Vec3 color = Black;
 
-            const Real c_LineThickness = 2. * lineOpacity;
+            const Real c_LineThickness = 3. * lineOpacity;
 
             bool isFirstPoint = true;
             Vec3 prevPoint_G{NaN};
@@ -2513,16 +2515,16 @@ void calcPathCorrections(MatrixWorkspace& data)
 int findDisabledIndex(
     const CableSpan::Impl& cable, const State& state)
 {
-    int ix = 0;
+    int activeIx = 0;
     int disabledIx = -1;
     for (ObstacleIndex ix(0); ix < cable.getNumObstacles(); ++ix) {
         if (!cable.getObstacleCurveSegment(ix).isInContactWithSurface(state))
         { continue;}
 
         if (cable.getParameters().obstacleDisabledBeta == ix) {
-            disabledIx = ix;
+            disabledIx = activeIx;
         }
-        ++ix;
+        ++activeIx;
     }
     return disabledIx;
 }
@@ -2672,7 +2674,13 @@ const MatrixWorkspace& CableSpan::Impl::calcDataInst(const State& s) const
     // us a correction vector in a direction that reduces the path error.
     if (getParameters().obstacleDisabledBeta.isValid()) {
         int disabledIx = findDisabledIndex(*this, s);
-        calcPathCorrectionsDisableBeta(data, disabledIx);
+
+        /* std::cout << "disabledIndex = " << getParameters().obstacleDisabledBeta <<", disabledIx = " << disabledIx << "\n"; */
+        if (disabledIx >= 0) {
+            calcPathCorrectionsDisableBeta(data, disabledIx);
+        } else {
+            calcPathCorrections(data);
+        }
     } else {
         calcPathCorrections(data);
     }
@@ -3174,6 +3182,11 @@ Real CableSpan::getObstacleBoundaryFrames(const State& state, CableSpanObstacleI
     return getImpl().getObstacleCurveSegment(ix).getDataInst(state).length;
 }
 
+void CableSpan::setAlgorithm(CableSpan::Algorithm algorithm)
+{
+    updImpl().updParameters().algorithm = algorithm;
+}
+
 Real CableSpan::getSurfaceConstraintTolerance() const
 {
     return getImpl().getParameters().constraintProjectionTolerance;
@@ -3209,9 +3222,9 @@ void CableSpan::setSolverMaxNormalIterations(int maxIterations)
     updImpl().updParameters().m_solverMaxNormalIterations = maxIterations;
 }
 
-void CableSpan::setDisableBeta(CableSpanObstacleIndex obstacle)
+void CableSpan::setDisableBeta(CableSpanObstacleIndex ix)
 {
-    updImpl().updParameters().obstacleDisabledBeta = obstacle;
+    updImpl().updParameters().obstacleDisabledBeta = ix;
 }
 
 void CableSpan::setColor(const Vec3& color)
