@@ -77,6 +77,7 @@ will include this one). **/
 #include "simbody/internal/CompliantContactSubsystem.h"
 #include "simbody/internal/CableTrackerSubsystem.h"
 #include "simbody/internal/CablePath.h"
+#include "simbody/internal/Wrapping.h"
 #include "simbody/internal/CableSpring.h"
 #include "simbody/internal/Visualizer.h"
 #include "simbody/internal/Visualizer_InputListener.h"
